@@ -1,0 +1,18 @@
+# Secrets — never commit
+.env
+
+# Benchmark output, regenerated on every run
+results.csv
+results.md
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+
+# Personal Claude Code overrides (.claude/settings.json is shared and tracked)
+.claude/settings.local.json

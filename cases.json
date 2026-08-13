@@ -1,0 +1,532 @@
+{
+  "tools": {
+    "calendar_lookup": {
+      "type": "function",
+      "function": {
+        "name": "calendar_lookup",
+        "description": "Look up events on a person's calendar for a specific date.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "person": {
+              "type": "string",
+              "description": "Email or username of the calendar owner."
+            },
+            "date": {
+              "type": "string",
+              "description": "Date to look up, in YYYY-MM-DD format."
+            }
+          },
+          "required": [
+            "person",
+            "date"
+          ]
+        }
+      }
+    },
+    "search_documents": {
+      "type": "function",
+      "function": {
+        "name": "search_documents",
+        "description": "Full-text search over the team's internal document store. Returns matching documents with their ids.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string",
+              "description": "Search query string."
+            },
+            "limit": {
+              "type": "integer",
+              "description": "Maximum number of results to return."
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      }
+    },
+    "create_task": {
+      "type": "function",
+      "function": {
+        "name": "create_task",
+        "description": "Create a task in the team task tracker.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string",
+              "description": "Short title of the task."
+            },
+            "assignee": {
+              "type": "string",
+              "description": "Username of the person the task is assigned to."
+            },
+            "due_date": {
+              "type": "string",
+              "description": "Due date in YYYY-MM-DD format."
+            }
+          },
+          "required": [
+            "title",
+            "assignee"
+          ]
+        }
+      }
+    },
+    "send_message": {
+      "type": "function",
+      "function": {
+        "name": "send_message",
+        "description": "Send a chat message to a person or channel.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "recipient": {
+              "type": "string",
+              "description": "Username or #channel to send to."
+            },
+            "body": {
+              "type": "string",
+              "description": "Message text."
+            }
+          },
+          "required": [
+            "recipient",
+            "body"
+          ]
+        }
+      }
+    },
+    "search_calendar": {
+      "type": "function",
+      "function": {
+        "name": "search_calendar",
+        "description": "Search a person's calendar by keyword across all dates. Use this when the date is unknown; use calendar_lookup when you already know the date.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "person": {
+              "type": "string",
+              "description": "Email or username of the calendar owner."
+            },
+            "query": {
+              "type": "string",
+              "description": "Keyword to match against event titles."
+            }
+          },
+          "required": [
+            "person",
+            "query"
+          ]
+        }
+      }
+    },
+    "update_task": {
+      "type": "function",
+      "function": {
+        "name": "update_task",
+        "description": "Update an existing task in the tracker, identified by its task id.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "task_id": {
+              "type": "string",
+              "description": "Id of the existing task, e.g. T-8821."
+            },
+            "status": {
+              "type": "string",
+              "description": "New status: open, in_progress, or closed."
+            },
+            "assignee": {
+              "type": "string",
+              "description": "New assignee username."
+            }
+          },
+          "required": [
+            "task_id"
+          ]
+        }
+      }
+    },
+    "get_document": {
+      "type": "function",
+      "function": {
+        "name": "get_document",
+        "description": "Fetch the full contents of a single document by its id. Ids come from search_documents results.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "document_id": {
+              "type": "string",
+              "description": "Document id, e.g. doc_114."
+            }
+          },
+          "required": [
+            "document_id"
+          ]
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "selection_calendar_lookup",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "What's on maria's calendar on 2026-03-12?",
+      "available_tools": [
+        "calendar_lookup",
+        "search_documents",
+        "create_task"
+      ],
+      "expected_tool_call": {
+        "name": "calendar_lookup",
+        "args": {
+          "person": "maria",
+          "date": "2026-03-12"
+        }
+      }
+    },
+    {
+      "id": "selection_create_task",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Create a task called \"Rotate the staging API keys\" and assign it to dimitris, due 2026-04-01.",
+      "available_tools": [
+        "create_task",
+        "calendar_lookup",
+        "send_message"
+      ],
+      "expected_tool_call": {
+        "name": "create_task",
+        "args": {
+          "title": "Rotate the staging API keys",
+          "assignee": "dimitris",
+          "due_date": "2026-04-01"
+        }
+      }
+    },
+    {
+      "id": "selection_search_documents",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Find our internal docs about the retention policy for audit logs.",
+      "available_tools": [
+        "search_documents",
+        "calendar_lookup",
+        "create_task",
+        "send_message"
+      ],
+      "expected_tool_call": {
+        "name": "search_documents",
+        "args": {
+          "query": "audit log retention policy"
+        },
+        "loose_args": [
+          "query"
+        ]
+      }
+    },
+    {
+      "id": "selection_search_vs_lookup",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Maria has a design review booked sometime this year but I don't know which day. Find it.",
+      "available_tools": [
+        "search_calendar",
+        "calendar_lookup",
+        "search_documents"
+      ],
+      "expected_tool_call": {
+        "name": "search_calendar",
+        "args": {
+          "person": "maria",
+          "query": "design review"
+        },
+        "loose_args": [
+          "query"
+        ]
+      }
+    },
+    {
+      "id": "selection_update_vs_create",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Task T-8821 is finished — mark it closed.",
+      "available_tools": [
+        "update_task",
+        "create_task",
+        "search_documents"
+      ],
+      "expected_tool_call": {
+        "name": "update_task",
+        "args": {
+          "task_id": "T-8821",
+          "status": "closed"
+        }
+      }
+    },
+    {
+      "id": "arguments_date_to_iso",
+      "type": "single_call",
+      "category": "arguments",
+      "prompt": "Check what maria has scheduled on March 12th, 2026.",
+      "available_tools": [
+        "calendar_lookup",
+        "search_calendar",
+        "get_document"
+      ],
+      "expected_tool_call": {
+        "name": "calendar_lookup",
+        "args": {
+          "person": "maria",
+          "date": "2026-03-12"
+        }
+      }
+    },
+    {
+      "id": "arguments_omit_optional",
+      "type": "single_call",
+      "category": "arguments",
+      "prompt": "Open a task titled \"Write the Q2 postmortem\" for elena. No deadline for now.",
+      "available_tools": [
+        "create_task",
+        "search_documents"
+      ],
+      "expected_tool_call": {
+        "name": "create_task",
+        "args": {
+          "title": "Write the Q2 postmortem",
+          "assignee": "elena"
+        },
+        "forbidden_args": [
+          "due_date"
+        ]
+      }
+    },
+    {
+      "id": "chaining_arg_from_output",
+      "type": "multi_call_chain",
+      "category": "chaining",
+      "prompt": "Look up maria's calendar for 2026-03-12, then message the organizer of her first event that day to confirm she'll attend.",
+      "available_tools": [
+        "calendar_lookup",
+        "send_message",
+        "search_documents"
+      ],
+      "expected_tool_call": {
+        "sequence": [
+          {
+            "name": "calendar_lookup",
+            "args": {
+              "person": "maria",
+              "date": "2026-03-12"
+            }
+          },
+          {
+            "name": "send_message",
+            "args": {
+              "recipient": "dimitris",
+              "body": "confirm"
+            },
+            "loose_args": [
+              "body"
+            ]
+          }
+        ]
+      },
+      "tool_results": {
+        "calendar_lookup": "{\"events\": [{\"title\": \"Design review\", \"start\": \"2026-03-12T10:00:00\", \"organizer\": \"dimitris\"}, {\"title\": \"1:1\", \"start\": \"2026-03-12T15:00:00\", \"organizer\": \"elena\"}]}",
+        "send_message": "{\"status\": \"sent\"}",
+        "search_documents": "{\"results\": []}"
+      }
+    },
+    {
+      "id": "chaining_calendar_then_message",
+      "type": "multi_call_chain",
+      "category": "chaining",
+      "prompt": "Check whether maria has anything booked on 2026-03-12, then message her with what you find.",
+      "available_tools": [
+        "calendar_lookup",
+        "send_message",
+        "search_documents"
+      ],
+      "expected_tool_call": {
+        "sequence": [
+          "calendar_lookup",
+          "send_message"
+        ]
+      },
+      "tool_results": {
+        "calendar_lookup": "{\"events\": [{\"title\": \"Design review\", \"start\": \"2026-03-12T10:00:00\"}]}",
+        "send_message": "{\"status\": \"sent\"}",
+        "search_documents": "{\"results\": []}"
+      }
+    },
+    {
+      "id": "chaining_id_from_output",
+      "type": "multi_call_chain",
+      "category": "chaining",
+      "prompt": "Find our onboarding checklist document, then pull up its full contents so I can read them.",
+      "available_tools": [
+        "search_documents",
+        "get_document",
+        "create_task"
+      ],
+      "expected_tool_call": {
+        "sequence": [
+          {
+            "name": "search_documents",
+            "args": {
+              "query": "onboarding checklist"
+            },
+            "loose_args": [
+              "query"
+            ]
+          },
+          {
+            "name": "get_document",
+            "args": {
+              "document_id": "doc_114"
+            }
+          }
+        ]
+      },
+      "tool_results": {
+        "search_documents": "{\"results\": [{\"id\": \"doc_114\", \"title\": \"Onboarding checklist\", \"updated\": \"2025-11-02\"}]}",
+        "get_document": "{\"id\": \"doc_114\", \"title\": \"Onboarding checklist\", \"body\": \"1. Create accounts. 2. Assign a buddy. 3. Book the week-one review.\"}",
+        "create_task": "{\"task_id\": \"T-9001\", \"status\": \"created\"}"
+      }
+    },
+    {
+      "id": "chaining_search_then_task",
+      "type": "multi_call_chain",
+      "category": "chaining",
+      "prompt": "Search our docs for the onboarding checklist, then create a task for nikos titled \"Update the onboarding checklist\".",
+      "available_tools": [
+        "search_documents",
+        "create_task",
+        "calendar_lookup"
+      ],
+      "expected_tool_call": {
+        "sequence": [
+          "search_documents",
+          "create_task"
+        ]
+      },
+      "tool_results": {
+        "search_documents": "{\"results\": [{\"id\": \"doc_114\", \"title\": \"Onboarding checklist\", \"updated\": \"2025-11-02\"}]}",
+        "create_task": "{\"task_id\": \"T-8821\", \"status\": \"created\"}",
+        "calendar_lookup": "{\"events\": []}",
+        "send_message": "{\"status\": \"sent\"}"
+      }
+    },
+    {
+      "id": "chaining_three_steps",
+      "type": "multi_call_chain",
+      "category": "chaining",
+      "prompt": "Find our onboarding checklist document, read its contents, then create a task for nikos to revise it.",
+      "available_tools": [
+        "search_documents",
+        "get_document",
+        "create_task",
+        "update_task"
+      ],
+      "expected_tool_call": {
+        "sequence": [
+          {
+            "name": "search_documents",
+            "args": {
+              "query": "onboarding checklist"
+            },
+            "loose_args": [
+              "query"
+            ]
+          },
+          {
+            "name": "get_document",
+            "args": {
+              "document_id": "doc_114"
+            }
+          },
+          {
+            "name": "create_task",
+            "args": {
+              "assignee": "nikos",
+              "title": "revise"
+            },
+            "loose_args": [
+              "title"
+            ]
+          }
+        ]
+      },
+      "tool_results": {
+        "search_documents": "{\"results\": [{\"id\": \"doc_114\", \"title\": \"Onboarding checklist\", \"updated\": \"2025-11-02\"}]}",
+        "get_document": "{\"id\": \"doc_114\", \"title\": \"Onboarding checklist\", \"body\": \"1. Create accounts. 2. Assign a buddy. 3. Book the week-one review.\"}",
+        "create_task": "{\"task_id\": \"T-9002\", \"status\": \"created\"}",
+        "update_task": "{\"task_id\": \"T-9002\", \"status\": \"updated\"}"
+      }
+    },
+    {
+      "id": "restraint_explicit_negation",
+      "type": "no_call",
+      "category": "restraint",
+      "prompt": "Don't actually do anything yet — just tell me in one sentence which tool you would use to open a task for elena, and why.",
+      "available_tools": [
+        "create_task",
+        "update_task",
+        "search_documents"
+      ],
+      "expected_tool_call": null
+    },
+    {
+      "id": "restraint_general_question",
+      "type": "no_call",
+      "category": "restraint",
+      "prompt": "In one sentence, what is the difference between a task queue and a message broker?",
+      "available_tools": [
+        "calendar_lookup",
+        "search_documents",
+        "create_task"
+      ],
+      "expected_tool_call": null
+    },
+    {
+      "id": "refusal_missing_assignee",
+      "type": "should_refuse",
+      "category": "refusal",
+      "prompt": "Create a task to fix that flaky test.",
+      "available_tools": [
+        "create_task",
+        "search_documents"
+      ],
+      "expected_tool_call": null
+    },
+    {
+      "id": "refusal_missing_body",
+      "type": "should_refuse",
+      "category": "refusal",
+      "prompt": "Send maria the update.",
+      "available_tools": [
+        "send_message",
+        "search_documents",
+        "calendar_lookup"
+      ],
+      "expected_tool_call": null
+    },
+    {
+      "id": "refusal_relative_date",
+      "type": "should_refuse",
+      "category": "refusal",
+      "prompt": "What's on maria's calendar next Tuesday?",
+      "available_tools": [
+        "calendar_lookup",
+        "search_calendar"
+      ],
+      "expected_tool_call": null
+    }
+  ]
+}
