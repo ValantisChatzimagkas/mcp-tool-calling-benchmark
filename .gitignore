@@ -14,5 +14,5 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Personal Claude Code overrides (.claude/settings.json is shared and tracked)
-.claude/settings.local.json
+# Local Claude Code config — personal to this machine, not part of the project
+.claude/
