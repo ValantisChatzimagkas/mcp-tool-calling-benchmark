@@ -23,24 +23,41 @@ uv run run_eval.py
 ```bash
 uv run run_eval.py --models openai/gpt-oss-20b     # one model
 uv run run_eval.py --cases cal_lookup_basic        # one case, all models
+uv run run_eval.py --runs 1                        # one run per case, for a smoke test
 ```
+
+## Repeated runs
+
+Every (model, case) pair runs `RUNS_PER_CASE` times (3 by default, `--runs` to
+override) and reports `k/n` rather than a single pass/fail. Tool calling is
+nondeterministic even at `temperature=0`, and on one run per case a real capability gap
+and a coin flip look identical. A case that scores 2/3 is telling you something a
+`FAIL` would hide.
+
+Nothing more than a plain `k/n` is reported — no confidence intervals, no significance
+tests. At 21 cases the fraction is the honest summary and anything else is decoration.
 
 ## Output
 
-Progress prints live as it runs:
+Progress prints live as it runs, with the per-case run count in the left column:
 
 ```
-=== llama-3.3-70b-versatile ===
-  [PASS] cal_lookup_basic         ok
-  [FAIL] missing_required_info    called tool(s) when none expected: create_task
-  [FAIL] chain_three_steps        get_document: wrong value for document_id: 'doc_id_from_search_results' != 'doc_114'
+=== llama-3.3-70b-versatile (3 run(s) per case) ===
+  [3/3] selection_calendar_lookup ok
+  [0/3] refusal_missing_body      called tool(s) when none expected: send_message
+  [1/3] chaining_three_steps      get_document: wrong value for document_id: 'doc_id_from_search_results' != 'doc_114'
 ```
 
 Two files are written at the end (both gitignored — they are regenerated every run):
 
-- `results.csv` — one row per (model, case): `model, case_id, category, case_type, result, notes`
+- `results.csv` — one row per (model, case):
+  `model, case_id, category, case_type, runs_passed, runs_total, notes`. The two counts
+  are plain integers; `notes` holds the deduped notes from the failing runs.
 - `results.md` — run metadata, a pass-rate table broken down by category, the full
-  result matrix grouped by category, and every failure note
+  result matrix grouped by category (`passed/total` per cell), and every failure note
+
+Every rate — per category and overall — is passed runs over total runs, so a case that
+passes 2 of 3 counts as two thirds of a case instead of rounding to a pass or a fail.
 
 The per-category breakdown is the point: one aggregate number tells you a model scored
 14/17, which is not actionable. The breakdown tells you it went 5/5 on selection and
@@ -70,6 +87,7 @@ URL. That is what lets the same script hit a local server unchanged.
 |---|---|
 | `API_BASE_URL` | endpoint, overridable from `.env` |
 | `MODELS` | model ids to sweep |
+| `RUNS_PER_CASE` | runs per (model, case); `--runs` overrides it per invocation |
 | `DELAY_BETWEEN_CALLS_SECONDS` | rate-limit spacing (see below) |
 | `MAX_CHAIN_STEPS` | turn budget for a `multi_call_chain` case |
 
@@ -234,8 +252,11 @@ unconditionally).
 
 Groq's free tier is roughly 30 requests/minute. `DELAY_BETWEEN_CALLS_SECONDS` spaces
 calls out, and HTTP 429 is retried with backoff, honouring `Retry-After` when the
-server sends it. A full 3-model sweep takes a few minutes. Set the delay to `0` for a
-local server.
+server sends it. Set the delay to `0` for a local server.
+
+Repeats multiply the call count, not the rate: 21 cases x 3 models x 3 runs is roughly
+190 calls, and the 3s spacing holds that at ~20 requests/minute either way. The sweep
+gets longer (~10 minutes), not denser. Use `--runs 1` with `--cases` for a quick check.
 
 A failed API call is scored as a fail with the error in the notes column — it never
 aborts the sweep, so one flaky model doesn't cost you the whole run.

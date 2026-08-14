@@ -27,8 +27,15 @@ REQUEST_TIMEOUT_SECONDS = 60
 TEMPERATURE = 0.0
 MAX_CHAIN_STEPS = 6
 
+# Tool calling is nondeterministic even at temperature 0, so every (model, case) pair
+# runs this many times and reports k/n instead of a single pass/fail. Override per run
+# with --runs.
+RUNS_PER_CASE = 3
+
 # Groq's free tier is roughly 30 requests/minute; a small gap between calls
-# keeps a full sweep under that without needing token-bucket bookkeeping.
+# keeps a full sweep under that without needing token-bucket bookkeeping. 3s caps the
+# sweep at ~20 requests/minute, which holds however many runs RUNS_PER_CASE asks for —
+# repeats make the sweep longer, not denser.
 DELAY_BETWEEN_CALLS_SECONDS = 3.0
 MAX_RETRIES_ON_429 = 3
 RETRY_BACKOFF_SECONDS = 20

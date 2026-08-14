@@ -7,6 +7,8 @@ They also pin down the suite's conventions (category names, the `<category>_<spe
 id scheme, grouping) so it can't drift back into ad-hoc naming as cases get added.
 """
 
+from run_eval import CSV_COLUMNS, _fraction, _tally
+
 CATEGORIES = {"selection", "arguments", "chaining", "restraint", "refusal"}
 
 
@@ -89,3 +91,39 @@ def test_every_category_has_at_least_one_case(suite):
     """A category that exists only in docs is a gap in the suite, not a category."""
     present = {case["category"] for case in suite["cases"]}
     assert present == CATEGORIES, f"unused categories: {sorted(CATEGORIES - present)}"
+
+
+# --- the results rollup -----------------------------------------------------
+# Not about cases.json, but the same failure mode: a rollup that quietly counts the
+# wrong thing still prints a plausible-looking table.
+
+
+def _row(passed, total, category="selection"):
+    return {"category": category, "runs_passed": passed, "runs_total": total}
+
+
+def test_tally_sums_runs_not_cases():
+    """Two cases at 2/3 is 4/6, not 0/2 or 2/2."""
+    assert _tally([_row(2, 3), _row(2, 3)]) == (4, 6)
+
+
+def test_tally_of_no_rows_is_zero():
+    assert _tally([]) == (0, 0)
+
+
+def test_tally_counts_a_partially_passing_case_partially():
+    assert _tally([_row(3, 3), _row(1, 3)]) == (4, 6)
+
+
+def test_fraction_reports_the_run_level_rate():
+    assert _fraction(*_tally([_row(3, 3), _row(1, 3)])) == "4/6 (67%)"
+
+
+def test_fraction_of_nothing_is_a_dash():
+    assert _fraction(0, 0) == "—"
+
+
+def test_csv_columns_carry_both_run_counts():
+    """Dropping either one turns k/n back into an unreadable single number."""
+    assert "runs_passed" in CSV_COLUMNS and "runs_total" in CSV_COLUMNS
+    assert "result" not in CSV_COLUMNS

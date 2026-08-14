@@ -6,6 +6,7 @@ PASS), so most of these tests assert that a bad call is *rejected*.
 """
 
 from client import parse_tool_calls
+from run_eval import summarize_runs
 from scoring import (
     check_args,
     collapse_consecutive,
@@ -326,3 +327,40 @@ def test_parse_survives_non_object_arguments():
 def test_missing_arguments_key_becomes_empty_dict():
     message = {"tool_calls": [{"id": "c1", "function": {"name": "list_all"}}]}
     assert parse_tool_calls(message) == [("list_all", {})]
+
+
+# --- summarize_runs ---------------------------------------------------------
+
+
+def test_summarize_counts_every_run():
+    assert summarize_runs([(True, "ok"), (False, "no tool call made"), (True, "ok")])[:2] == (2, 3)
+
+
+def test_summarize_all_passing_reports_ok():
+    assert summarize_runs([(True, "ok"), (True, "ok")]) == (2, 2, "ok")
+
+
+def test_summarize_all_failing_reports_zero():
+    passed, total, _ = summarize_runs([(False, "x"), (False, "x")])
+    assert (passed, total) == (0, 2)
+
+
+def test_summarize_single_run():
+    assert summarize_runs([(False, "no tool call made")]) == (0, 1, "no tool call made")
+
+
+def test_summarize_dedupes_identical_failure_notes():
+    """Three runs failing the same way is one fact, not three lines of CSV."""
+    _, _, notes = summarize_runs([(False, "wrong tool"), (False, "wrong tool")])
+    assert notes == "wrong tool"
+
+
+def test_summarize_keeps_distinct_failure_notes_in_order():
+    """The last run must not overwrite an earlier, different failure."""
+    _, _, notes = summarize_runs([(False, "wrong tool"), (True, "ok"), (False, "missing arg")])
+    assert notes == "wrong tool; missing arg"
+
+
+def test_summarize_ignores_notes_from_passing_runs():
+    _, _, notes = summarize_runs([(True, "ok"), (False, "wrong tool")])
+    assert notes == "wrong tool"

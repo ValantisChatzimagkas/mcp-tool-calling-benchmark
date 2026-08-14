@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Benchmark MCP-style tool-calling reliability across OpenAI-compatible models.
 
-Loads the case suite, runs every model against every case, scores each one, and writes
-results.csv and results.md.
+Loads the case suite, runs every model against every case config.RUNS_PER_CASE times,
+scores each run, and writes results.csv and results.md as pass rates (k/n).
 """
 
 import argparse
@@ -77,7 +77,42 @@ def run_case(model, case, tool_registry) -> tuple[bool, str]:
     return False, f"unknown case type: {case['type']}"
 
 
-CSV_COLUMNS = ["model", "case_id", "category", "case_type", "result", "notes"]
+def summarize_runs(results) -> tuple[int, int, str]:
+    """Roll repeated (passed, note) runs of one case up into (passed, total, notes).
+
+    Notes come from the failing runs only, deduped in first-seen order: three runs
+    failing the same way should read once, and a run that failed differently must not
+    be overwritten by whichever run happened to go last.
+    """
+    passed = sum(1 for ok, _ in results if ok)
+    failures = list(dict.fromkeys(note for ok, note in results if not ok))
+    return passed, len(results), "; ".join(failures) if failures else "ok"
+
+
+def run_case_repeated(model, case, tool_registry, runs) -> tuple[int, int, str]:
+    """Run one case `runs` times. A failed run is scored as a fail, never fatal."""
+    results = []
+    for index in range(runs):
+        try:
+            results.append(run_case(model, case, tool_registry))
+        except ApiError as exc:
+            results.append((False, f"api error: {exc}"))
+        except Exception as exc:  # a broken case must not kill the sweep
+            results.append((False, f"{type(exc).__name__}: {exc}"))
+        if index < runs - 1:
+            time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
+    return summarize_runs(results)
+
+
+CSV_COLUMNS = [
+    "model",
+    "case_id",
+    "category",
+    "case_type",
+    "runs_passed",
+    "runs_total",
+    "notes",
+]
 
 
 def write_csv(rows, path):
@@ -85,21 +120,24 @@ def write_csv(rows, path):
     with open(path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
         writer.writeheader()
-        for row in rows:
-            writer.writerow({**row, "result": "pass" if row["passed"] else "fail"})
+        writer.writerows(rows)
 
 
 def _tally(rows):
-    """(passed, total) for a group of result rows."""
-    return sum(1 for r in rows if r["passed"]), len(rows)
+    """(passed runs, total runs) for a group of result rows — runs, not cases."""
+    return sum(r["runs_passed"] for r in rows), sum(r["runs_total"] for r in rows)
 
 
 def _fraction(passed, total):
     return f"{passed}/{total} ({passed / total:.0%})" if total else "—"
 
 
-def write_markdown(rows, models, cases, path):
-    """Run metadata, per-category pass rates, a result matrix, and every failure note."""
+def write_markdown(rows, models, cases, runs, path):
+    """Run metadata, per-category pass rates, a result matrix, and every failure note.
+
+    Every rate is passed runs over total runs, so a case that passes 2 of 3 counts as
+    two thirds of a case rather than rounding to a pass or a fail.
+    """
     categories = list(dict.fromkeys(c["category"] for c in cases))
     lookup = {(r["model"], r["case_id"]): r for r in rows}
     lines = []
@@ -111,6 +149,7 @@ def write_markdown(rows, models, cases, path):
         f"- **Endpoint:** `{config.API_BASE_URL}`",
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
         f"- **Models:** {len(models)}",
+        f"- **Runs per case:** {runs}",
         "",
         "## Pass rate",
         "",
@@ -136,16 +175,23 @@ def write_markdown(rows, models, cases, path):
             cells = []
             for model in models:
                 row = lookup.get((model, case["id"]))
-                cells.append("—" if row is None else ("pass" if row["passed"] else "**FAIL**"))
+                if row is None:
+                    cells.append("—")
+                    continue
+                cell = f"{row['runs_passed']}/{row['runs_total']}"
+                cells.append(cell if row["runs_passed"] == row["runs_total"] else f"**{cell}**")
             lines.append(f"| {case['id']} | {case['type']} | " + " | ".join(cells) + " |")
         lines.append("")
 
     lines += ["## Failure notes", ""]
-    failures = [r for r in rows if not r["passed"]]
+    failures = [r for r in rows if r["runs_passed"] < r["runs_total"]]
     if not failures:
         lines.append("None.")
     for row in failures:
-        lines.append(f"- `{row['model']}` / `{row['case_id']}`: {row['notes']}")
+        lines.append(
+            f"- `{row['model']}` / `{row['case_id']}` "
+            f"({row['runs_passed']}/{row['runs_total']}): {row['notes']}"
+        )
 
     with open(path, "w") as f:
         f.write("\n".join(lines) + "\n")
@@ -155,7 +201,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="+", help="override the model list in config")
     parser.add_argument("--cases", nargs="+", help="only run these case ids")
+    parser.add_argument(
+        "--runs",
+        type=int,
+        help=f"runs per (model, case); overrides RUNS_PER_CASE={config.RUNS_PER_CASE}",
+    )
     args = parser.parse_args()
+
+    runs = args.runs if args.runs is not None else config.RUNS_PER_CASE
+    if runs < 1:
+        sys.exit("--runs must be at least 1")
 
     if not config.API_KEY and "localhost" not in config.API_BASE_URL:
         sys.exit("GROQ_API_KEY is not set — copy .env.example to .env and fill it in.")
@@ -173,31 +228,26 @@ def main():
     rows = []
 
     for model in models:
-        print(f"\n=== {model} ===")
+        print(f"\n=== {model} ({runs} run(s) per case) ===")
         for case in cases:
-            try:
-                passed, notes = run_case(model, case, tool_registry)
-            except ApiError as exc:
-                passed, notes = False, f"api error: {exc}"
-            except Exception as exc:  # a broken case must not kill the sweep
-                passed, notes = False, f"{type(exc).__name__}: {exc}"
+            passed, total, notes = run_case_repeated(model, case, tool_registry, runs)
 
-            status = "PASS" if passed else "FAIL"
-            print(f"  [{status}] {case['id']:<24} {notes}")
+            print(f"  [{passed}/{total}] {case['id']:<24} {notes}")
             rows.append(
                 {
                     "model": model,
                     "case_id": case["id"],
                     "category": case["category"],
                     "case_type": case["type"],
-                    "passed": passed,
+                    "runs_passed": passed,
+                    "runs_total": total,
                     "notes": notes,
                 }
             )
             time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
 
     write_csv(rows, config.RESULTS_CSV_PATH)
-    write_markdown(rows, models, cases, config.RESULTS_MD_PATH)
+    write_markdown(rows, models, cases, runs, config.RESULTS_MD_PATH)
     print(f"\nWrote {config.RESULTS_CSV_PATH} and {config.RESULTS_MD_PATH}")
 
 
