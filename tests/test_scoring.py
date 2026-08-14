@@ -11,6 +11,7 @@ from scoring import (
     collapse_consecutive,
     score_chain,
     score_no_call,
+    score_refusal,
     score_single_call,
 )
 
@@ -140,6 +141,63 @@ def test_no_call_rejects_empty_answer():
 def test_no_call_rejects_missing_content_key():
     ok, _ = score_no_call([], {})
     assert not ok
+
+
+# --- score_refusal ----------------------------------------------------------
+
+MISSING_ASSIGNEE = {"must_mention": ["assign", "who"], "require_question": True}
+
+
+def test_refusal_happy_path():
+    message = {"content": "Who should I assign that task to?"}
+    ok, _ = score_refusal([], message, MISSING_ASSIGNEE)
+    assert ok
+
+
+def test_refusal_rejects_a_tool_call():
+    ok, note = score_refusal([("create_task", {})], {"content": "Who?"}, MISSING_ASSIGNEE)
+    assert not ok
+    assert "create_task" in note
+
+
+def test_refusal_rejects_an_assertion_with_no_question():
+    """'I can't do that' is not a clarifying question — the old scorer passed it."""
+    message = {"content": "I'm unable to create that task."}
+    ok, note = score_refusal([], message, MISSING_ASSIGNEE)
+    assert not ok
+    assert "did not ask a question" in note
+
+
+def test_refusal_rejects_a_question_about_the_wrong_thing():
+    """Changing the subject shouldn't count as asking about the missing value."""
+    message = {"content": "Would you like me to search the docs instead?"}
+    ok, note = score_refusal([], message, MISSING_ASSIGNEE)
+    assert not ok
+    assert "never named the missing info" in note
+
+
+def test_refusal_accepts_any_of_the_mentioned_terms():
+    ok, _ = score_refusal([], {"content": "Who is this for?"}, MISSING_ASSIGNEE)
+    assert ok
+    ok, _ = score_refusal([], {"content": "Which user should I assign it to?"}, MISSING_ASSIGNEE)
+    assert ok
+
+
+def test_refusal_mention_matching_is_case_insensitive():
+    ok, _ = score_refusal([], {"content": "WHO should own this?"}, MISSING_ASSIGNEE)
+    assert ok
+
+
+def test_refusal_rejects_empty_answer():
+    ok, note = score_refusal([], {"content": "  "}, MISSING_ASSIGNEE)
+    assert not ok
+    assert "no text answer" in note
+
+
+def test_refusal_question_requirement_can_be_waived():
+    spec = {"must_mention": ["assign"], "require_question": False}
+    ok, _ = score_refusal([], {"content": "I need an assignee first."}, spec)
+    assert ok
 
 
 # --- collapse_consecutive ---------------------------------------------------

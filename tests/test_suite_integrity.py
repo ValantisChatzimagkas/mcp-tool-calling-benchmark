@@ -74,6 +74,17 @@ def test_cases_are_grouped_by_category(suite):
     assert len(seen) == len(set(seen)), f"category blocks are interleaved: {seen}"
 
 
+def test_every_should_refuse_case_declares_what_is_missing(suite):
+    """Without a non-empty `must_mention`, a refusal case degrades to "didn't call a
+    tool" — which any off-topic answer satisfies."""
+    for case in suite["cases"]:
+        if case["type"] != "should_refuse":
+            continue
+        spec = case.get("expected_refusal")
+        assert spec, f"{case['id']}: should_refuse case has no expected_refusal"
+        assert spec.get("must_mention"), f"{case['id']}: expected_refusal names nothing"
+
+
 def test_every_category_has_at_least_one_case(suite):
     """A category that exists only in docs is a gap in the suite, not a category."""
     present = {case["category"] for case in suite["cases"]}

@@ -65,6 +65,36 @@ def score_no_call(calls, message) -> tuple[bool, str]:
     return True, "ok"
 
 
+def score_refusal(calls, message, spec) -> tuple[bool, str]:
+    """No tool called, *and* the model actually asked about the missing information.
+
+    Stricter than score_no_call: a refusal case knows which value the prompt left out,
+    so the answer has to name it. Without this, "I can't help with that" and a cheerful
+    change of subject both score the same as a real clarifying question.
+
+    `must_mention` is any-of, matched case-insensitively as substrings, so a case lists
+    the plausible ways of naming the gap ("assign", "who", "owner") rather than one
+    exact phrasing. Deliberately not semantic matching — see README.
+    """
+    if calls:
+        called = ", ".join(c[0] for c in calls)
+        return False, f"called tool(s) when none expected: {called}"
+
+    content = (message.get("content") or "").strip()
+    if not content:
+        return False, "no tool call and no text answer"
+
+    if spec.get("require_question", True) and "?" not in content:
+        return False, "did not ask a question, just asserted"
+
+    wanted = spec.get("must_mention", [])
+    lowered = content.lower()
+    if wanted and not any(term.lower() in lowered for term in wanted):
+        return False, f"never named the missing info (expected one of {wanted})"
+
+    return True, "ok"
+
+
 def collapse_consecutive(calls):
     """Drop a repeat call to the same tool as the previous one; keep the first."""
     out = []

@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 import config
 from client import ApiError, chat, parse_tool_calls
-from scoring import score_chain, score_no_call, score_single_call
+from scoring import score_chain, score_no_call, score_refusal, score_single_call
 
 
 def load_suite(path):
@@ -70,7 +70,9 @@ def run_case(model, case, tool_registry) -> tuple[bool, str]:
 
     if case["type"] == "single_call":
         return score_single_call(calls, case["expected_tool_call"])
-    if case["type"] in ("no_call", "should_refuse"):
+    if case["type"] == "should_refuse":
+        return score_refusal(calls, message, case["expected_refusal"])
+    if case["type"] == "no_call":
         return score_no_call(calls, message)
     return False, f"unknown case type: {case['type']}"
 

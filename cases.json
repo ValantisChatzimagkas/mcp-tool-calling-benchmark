@@ -503,7 +503,17 @@
         "create_task",
         "search_documents"
       ],
-      "expected_tool_call": null
+      "expected_tool_call": null,
+      "expected_refusal": {
+        "must_mention": [
+          "assign",
+          "who",
+          "owner",
+          "person",
+          "which test"
+        ],
+        "require_question": true
+      }
     },
     {
       "id": "refusal_missing_body",
@@ -515,7 +525,19 @@
         "search_documents",
         "calendar_lookup"
       ],
-      "expected_tool_call": null
+      "expected_tool_call": null,
+      "expected_refusal": {
+        "must_mention": [
+          "text",
+          "content",
+          "what",
+          "say",
+          "wording",
+          "message",
+          "include"
+        ],
+        "require_question": true
+      }
     },
     {
       "id": "refusal_relative_date",
@@ -526,7 +548,17 @@
         "calendar_lookup",
         "search_calendar"
       ],
-      "expected_tool_call": null
+      "expected_tool_call": null,
+      "expected_refusal": {
+        "must_mention": [
+          "date",
+          "today",
+          "when",
+          "which day",
+          "specific day"
+        ],
+        "require_question": true
+      }
     }
   ]
 }

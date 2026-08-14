@@ -113,7 +113,7 @@ Every case carries two independent labels, and they answer different questions.
 | `single_call` | exactly one call, right tool, every expected arg present and matching |
 | `multi_call_chain` | tools called in the expected order, with the expected args, across turns |
 | `no_call` | no tool called, and a non-empty text answer came back |
-| `should_refuse` | no tool called — required info was missing, so the model should ask |
+| `should_refuse` | no tool called, *and* the model asked about the specific value the prompt left out |
 
 **`category` — what capability the case probes.** This drives reporting, and gives the
 case its id: ids are `<category>_<specific>`, enforced by
@@ -144,6 +144,25 @@ Optional per-case keys:
   a `due_date` nobody gave it.
 - `tool_results` — `multi_call_chain` only: canned JSON fed back per tool name, so the
   model has something to act on for the next step.
+- `expected_refusal` — `should_refuse` only, and required for it:
+
+```json
+"expected_refusal": {
+  "must_mention": ["text", "content", "what", "say", "wording", "message"],
+  "require_question": true
+}
+```
+
+`must_mention` is **any-of**, matched case-insensitively as plain substrings. A refusal
+case knows which value the prompt withheld, so the answer has to name it — otherwise
+"I can't help with that" and a cheerful change of subject score the same as a real
+clarifying question. List the plausible ways of naming the gap, not one exact phrasing.
+
+**Calibrate these against real responses, not from imagination.** The first draft of
+this list omitted "text", and a model that correctly answered *"I'll need the exact text
+you'd like me to send"* was scored as a failure. Run the case, read what the model
+actually says, then widen the list. A too-narrow list produces false failures exactly
+as misleading as the false passes this key exists to prevent.
 
 ### Chain expectations
 
@@ -223,11 +242,15 @@ aborts the sweep, so one flaky model doesn't cost you the whole run.
 
 ## Known limitations
 
-- `should_refuse` and `no_call` are scored identically ("no tool called + non-empty
-  answer"). A model that changes the subject passes a refusal case the same as one
-  that properly asks a clarifying question. Checking refusal *content* needs a keyword
-  check or an LLM judge; neither is in v1.
-- The `single_call` and distractor cases are currently saturated — all models tested
-  pass them. They cost API calls and contribute nothing to ranking.
+- Refusal content is checked by substring keywords, not meaning. A model could satisfy
+  `must_mention` while asking something unhelpful, and an unusual-but-correct phrasing
+  can fail until the list is widened. This is the deliberate v1 tradeoff — it stays
+  deterministic and offline-testable. An LLM judge would read intent properly, at the
+  cost of nondeterminism and an API call per case.
+- Adding the refusal-content check changed no verdict on the models tested: every
+  "didn't call a tool" was already a genuine clarifying question. It guards a real hole,
+  but it has not yet caught anything.
+- The `selection` and `arguments` categories are saturated — every model tested passes
+  all 7. They cost API calls and contribute nothing to ranking.
 - The self-hosted path is one config value and is not covered by tests; it has not been
   run against a live local server.

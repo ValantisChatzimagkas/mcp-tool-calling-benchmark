@@ -53,6 +53,10 @@ category's block; don't append to the end of the file.
   reason. Don't remove it when testing against Groq.
 - A failing benchmark case usually means the *model* got it wrong. Confirm the harness
   is actually wrong before changing scoring logic to make a case pass.
+- `must_mention` on a `should_refuse` case must be calibrated against what models
+  actually say, not guessed. A too-narrow list fails correct refusals — it already
+  happened once ("exact text" missed a list without "text"). Print the response before
+  trusting the verdict.
 - Scoring's dangerous failure is silent leniency, not a crash — an expectation that
   stops checking anything still prints PASS. Any change to `scoring.py` needs a
   `tests/test_scoring.py` case that fails before the change.
