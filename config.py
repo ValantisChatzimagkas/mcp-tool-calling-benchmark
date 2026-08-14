@@ -29,6 +29,6 @@ MAX_CHAIN_STEPS = 6
 
 # Groq's free tier is roughly 30 requests/minute; a small gap between calls
 # keeps a full sweep under that without needing token-bucket bookkeeping.
-DELAY_BETWEEN_CALLS_SECONDS = 2.0
+DELAY_BETWEEN_CALLS_SECONDS = 3.0
 MAX_RETRIES_ON_429 = 3
 RETRY_BACKOFF_SECONDS = 20

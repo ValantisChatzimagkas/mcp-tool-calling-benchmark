@@ -168,6 +168,29 @@
           ]
         }
       }
+    },
+    "create_reminder": {
+      "type": "function",
+      "function": {
+        "name": "create_reminder",
+        "description": "Set a personal reminder for yourself at a given time. For work assigned to another person, use create_task instead.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "description": "What to be reminded about."
+            },
+            "remind_at": {
+              "type": "string",
+              "description": "When, in YYYY-MM-DD format."
+            }
+          },
+          "required": [
+            "text"
+          ]
+        }
+      }
     }
   },
   "cases": [
@@ -206,6 +229,26 @@
           "assignee": "dimitris",
           "due_date": "2026-04-01"
         }
+      }
+    },
+    {
+      "id": "selection_search_before_fetch",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Pull up the doc titled 'Incident postmortem 2026-02'.",
+      "available_tools": [
+        "get_document",
+        "search_documents",
+        "create_task"
+      ],
+      "expected_tool_call": {
+        "name": "search_documents",
+        "args": {
+          "query": "Incident postmortem 2026-02"
+        },
+        "loose_args": [
+          "query"
+        ]
       }
     },
     {
@@ -251,6 +294,27 @@
       }
     },
     {
+      "id": "selection_task_vs_reminder",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Add something to the tracker for elena to review the Q2 numbers.",
+      "available_tools": [
+        "create_task",
+        "create_reminder",
+        "update_task"
+      ],
+      "expected_tool_call": {
+        "name": "create_task",
+        "args": {
+          "assignee": "elena",
+          "title": "review the Q2 numbers"
+        },
+        "loose_args": [
+          "title"
+        ]
+      }
+    },
+    {
       "id": "selection_update_vs_create",
       "type": "single_call",
       "category": "selection",
@@ -287,6 +351,23 @@
       }
     },
     {
+      "id": "arguments_enum_value",
+      "type": "single_call",
+      "category": "arguments",
+      "prompt": "Task T-8821 is moving again — put it back to in progress.",
+      "available_tools": [
+        "update_task",
+        "create_task"
+      ],
+      "expected_tool_call": {
+        "name": "update_task",
+        "args": {
+          "task_id": "T-8821",
+          "status": "in_progress"
+        }
+      }
+    },
+    {
       "id": "arguments_omit_optional",
       "type": "single_call",
       "category": "arguments",
@@ -303,6 +384,26 @@
         },
         "forbidden_args": [
           "due_date"
+        ]
+      }
+    },
+    {
+      "id": "arguments_verbatim_recipient",
+      "type": "single_call",
+      "category": "arguments",
+      "prompt": "Message #eng-team saying the deploy is frozen until Monday.",
+      "available_tools": [
+        "send_message",
+        "create_task"
+      ],
+      "expected_tool_call": {
+        "name": "send_message",
+        "args": {
+          "recipient": "#eng-team",
+          "body": "deploy is frozen until Monday"
+        },
+        "loose_args": [
+          "body"
         ]
       }
     },
