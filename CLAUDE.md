@@ -3,6 +3,11 @@
 Scores models on MCP-style tool calling via any OpenAI-compatible
 `/chat/completions` endpoint (Groq now, self-hosted later).
 
+**Scope:** Tests OpenAI-format function-calling reliability for tools shaped like MCP
+tools. Does not exercise the MCP protocol — no JSON-RPC, no `tools/list` / `tools/call`,
+no running MCP server. The name is kept for the connection to why the tools are shaped
+this way; don't let it license a protocol-level claim.
+
 ## Commands
 
 Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` or pip.
@@ -52,13 +57,59 @@ category's block; don't append to the end of the file.
 - `scoring.py` stays pure. Anything needing network or config belongs elsewhere, or
   the tests stop being able to run offline.
 
+## Evidence policy
+
+Applies to every write-up of results — `results.md` commentary, READMEs, commit
+messages, chat summaries. The failure mode this prevents is a confident headline that
+the numbers don't support.
+
+1. **No ranking claim without naming the specific cases that drove it.** "qwen scored
+   higher" is not a claim. "qwen passed 6/9 refusal runs, gpt-oss-20b 3/9, with the same
+   two cases failing all 3 replications each" is.
+2. **State `k/n` and its 95% Wilson interval, never a bare percentage.** `wilson_interval`
+   in `run_eval.py` computes it; `_fraction`/`_cell` render it. `3/3` is not "100%
+   reliable" — it's `44%–100%` at 95% confidence, and the report says so. This is the
+   one piece of statistical machinery in scope, deliberately: it's a closed-form formula
+   with no dependency, chosen because it stays sane at `p=0`/`p=1` where most cells sit.
+   Nothing past this — no significance tests, no multi-model comparison stats. That
+   would be precision the 3-run sample doesn't support.
+3. **Flag saturated categories as non-discriminating.** `write_markdown` already does
+   this per category (`saturated, contributes no discriminating evidence`) when every
+   model clears every run. Don't quote an overall figure without noting how much of it
+   is ceiling categories.
+4. **Name the ground-truth assumption behind any refusal-based claim.** `should_refuse`
+   cases encode a debatable policy — that a model must ask rather than resolve ambiguity
+   itself. `refusal_relative_date` ("next Tuesday") is the concrete contested case — see
+   README's Known limitations. State the assumption alongside the number; don't present
+   it as settled.
+5. **Scope every capability claim to what was actually tested.** Results from
+   Groq-hosted inference license "reliable under Groq-hosted inference; the self-hosted
+   serving path is untested" — not "good candidate for self-hosting". See README's Scope
+   section; it exists because "MCP Tool-Calling Benchmark" oversold what this tests
+   before that section was written — don't repeat that in a summary or a commit message.
+6. **Ground methodology choices in established work, not ad-hoc invention.** The `k/n`
+   framing follows τ-bench's `pass^k`. Any future scoring change (e.g. BFCL's
+   AST-vs-executable distinction) cites the approach it borrows.
+7. **Case/category counts in prose must match `cases.json`, checked, not remembered.**
+   README's category table once said 5 selection / 2 arguments after a hardening pass
+   had already made it 7/4 — a stale claim, not a lie, but indistinguishable from one to
+   a reader. Before writing a count into prose, `.venv/bin/python -c "import json;
+   from collections import Counter; print(Counter(c['category'] for c in
+   json.load(open('cases.json'))['cases']))"` or equivalent — don't recall it.
+
 ## Gotchas
 
 - `.env` holds a real Groq key. It is gitignored — never print it, commit it, or echo
   it into a shell command.
-- Groq free tier is ~30 requests/minute; `DELAY_BETWEEN_CALLS_SECONDS` exists for that
-  reason. Don't remove it when testing against Groq. Repeats make the full sweep ~190
-  calls and ~10 minutes long; use `--runs 1` with `--cases` when smoke-testing.
+- Groq's real constraint (checked via response headers, not assumed) is tokens/minute
+  per model — 8000 TPM for qwen on this key — not a flat requests/minute number. Tool
+  schemas are large, so `qwen` hits 429s that `gpt-oss-20b`/`llama-3.3-70b` don't, on
+  the same schedule. `DELAY_BETWEEN_CALLS_SECONDS` paces by request count and does not
+  prevent this by itself; the retry-with-backoff in `client.py` is what actually
+  recovers the run. Don't "fix" qwen's retries by cranking the delay up further without
+  checking `x-ratelimit-*` headers first — request-count pacing isn't the lever.
+  Repeats make the full sweep ~190 base calls and ~10 minutes long; use `--runs 1` with
+  `--cases` when smoke-testing.
 - A failing benchmark case usually means the *model* got it wrong. Confirm the harness
   is actually wrong before changing scoring logic to make a case pass.
 - `must_mention` on a `should_refuse` case must be calibrated against what models

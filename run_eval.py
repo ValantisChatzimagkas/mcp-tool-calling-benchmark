@@ -8,6 +8,7 @@ scores each run, and writes results.csv and results.md as pass rates (k/n).
 import argparse
 import csv
 import json
+import math
 import sys
 import time
 from datetime import datetime, timezone
@@ -128,8 +129,48 @@ def _tally(rows):
     return sum(r["runs_passed"] for r in rows), sum(r["runs_total"] for r in rows)
 
 
+def wilson_interval(passed, total, z=1.96) -> tuple[float, float]:
+    """95%-by-default Wilson score interval for a binomial proportion.
+
+    Plain k/n overstates confidence at small n: 3/3 reads as "100% reliable", but
+    the actual 95% interval on 3 runs is roughly 44-100%. Wilson (not the naive
+    normal-approximation interval) stays well-behaved at p=0 or p=1, which is
+    exactly where most cells in this report sit.
+    """
+    if total == 0:
+        return 0.0, 0.0
+    p = passed / total
+    denom = 1 + z**2 / total
+    center = p + z**2 / (2 * total)
+    margin = z * math.sqrt(p * (1 - p) / total + z**2 / (4 * total**2))
+    low = (center - margin) / denom
+    high = (center + margin) / denom
+    return max(0.0, low), min(1.0, high)
+
+
 def _fraction(passed, total):
-    return f"{passed}/{total} ({passed / total:.0%})" if total else "—"
+    if not total:
+        return "—"
+    lo, hi = wilson_interval(passed, total)
+    return f"{passed}/{total} ({passed / total:.0%}, {lo:.0%}–{hi:.0%} CI)"
+
+
+def _cell(passed, total):
+    """One result-matrix cell: k/n plus its CI, bolded when not a clean pass."""
+    lo, hi = wilson_interval(passed, total)
+    text = f"{passed}/{total} ({lo:.0%}–{hi:.0%})"
+    return text if passed == total else f"**{text}**"
+
+
+# Ground-truth or scoring caveats worth surfacing next to a category's results,
+# rather than leaving the reader to infer them from the numbers alone.
+CATEGORY_NOTES = {
+    "refusal": (
+        "Scored by `must_mention` keyword lists in cases.json, calibrated against "
+        "responses actually observed from these 3 models — not a systematic process. "
+        "A correct refusal phrased unusually by an untested model could false-fail here."
+    ),
+}
 
 
 def write_markdown(rows, models, cases, runs, path):
@@ -150,6 +191,10 @@ def write_markdown(rows, models, cases, runs, path):
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
         f"- **Models:** {len(models)}",
         f"- **Runs per case:** {runs}",
+        "- **Confidence:** 95% Wilson score intervals in parentheses. At "
+        f"{runs} run(s) per case these are wide by nature — a clean k/n is not "
+        "proof of reliability, it's a sample. See README's Scope section before "
+        "treating any single number here as a verdict.",
         "",
         "## Pass rate",
         "",
@@ -165,9 +210,22 @@ def write_markdown(rows, models, cases, runs, path):
 
     lines += ["", "## Results", ""]
     for category in categories:
+        lines += [f"### {category}", ""]
+        if category in CATEGORY_NOTES:
+            lines += [CATEGORY_NOTES[category], ""]
+
+        cat_rows = [r for r in rows if r["category"] == category]
+        per_model = {m: _tally([r for r in cat_rows if r["model"] == m]) for m in models}
+        saturated = all(p == t and t > 0 for p, t in per_model.values())
+        if saturated:
+            total_runs = next(iter(per_model.values()))[1]
+            lines += [
+                f"_Every model passed all {total_runs} runs in this category — "
+                "saturated, contributes no discriminating evidence._",
+                "",
+            ]
+
         lines += [
-            f"### {category}",
-            "",
             "| case | type | " + " | ".join(models) + " |",
             "|---|---|" + "---|" * len(models),
         ]
@@ -175,11 +233,7 @@ def write_markdown(rows, models, cases, runs, path):
             cells = []
             for model in models:
                 row = lookup.get((model, case["id"]))
-                if row is None:
-                    cells.append("—")
-                    continue
-                cell = f"{row['runs_passed']}/{row['runs_total']}"
-                cells.append(cell if row["runs_passed"] == row["runs_total"] else f"**{cell}**")
+                cells.append("—" if row is None else _cell(row["runs_passed"], row["runs_total"]))
             lines.append(f"| {case['id']} | {case['type']} | " + " | ".join(cells) + " |")
         lines.append("")
 

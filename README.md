@@ -1,5 +1,32 @@
 # MCP Tool-Calling Benchmark
 
+## Scope — read this before trusting a number in this repo
+
+**What this tests:** OpenAI-format function-calling reliability, for tool schemas
+shaped like the tools an MCP server would expose (a calendar lookup, a search, a
+create-task call, and so on).
+
+**What this does not test:**
+
+- **The MCP protocol itself.** No JSON-RPC, no `tools/list` / `tools/call`, no running
+  MCP server anywhere in this repo. Tool schemas are hand-authored dicts in
+  `cases.json`, sent directly as OpenAI-format `tools` in the request body. A real MCP
+  server's schemas are known to be messier than hand-written ones ([BFCL v4's own
+  notes say so](https://gorilla.cs.berkeley.edu/leaderboard.html)), and multi-server
+  tool-namespace collisions aren't modeled at all — this suite has one flat tool
+  registry, never several servers' worth colliding. Both are plausible sources of
+  failure this benchmark cannot see.
+- **The actual self-hosted stack.** Every result so far ran against Groq's hosted
+  inference. `API_BASE_URL` can point at llama.cpp/Ollama with one `.env` line (see
+  below), but that path has not actually been exercised. Quantization and serving
+  differences between Groq's hosting and whatever runs locally could shift tool-calling
+  behavior in either direction — this is untested, not assumed fine.
+- **A certification.** A model passing every case here is evidence it's a reasonable
+  *candidate* for MCP-style tool use, not proof it will behave identically once wired
+  into a real MCP-based agent. Treat results as a screening signal, not a verdict —
+  see **Known limitations** at the bottom for the specific gaps in the current 21-case
+  suite.
+
 Measures how reliably a model handles MCP-style tool calling: picking the right tool,
 filling in the right arguments, chaining calls that depend on each other, and — just
 as important — *not* calling a tool when it shouldn't.
@@ -34,8 +61,15 @@ nondeterministic even at `temperature=0`, and on one run per case a real capabil
 and a coin flip look identical. A case that scores 2/3 is telling you something a
 `FAIL` would hide.
 
-Nothing more than a plain `k/n` is reported — no confidence intervals, no significance
-tests. At 21 cases the fraction is the honest summary and anything else is decoration.
+`results.md` shows a 95% Wilson score interval next to every `k/n` — `3/3 (44%–100%)`,
+not `3/3 (100%)`. A perfect score on 3 runs is not proof of 100% reliability; the
+interval says so explicitly instead of implying more certainty than 3 samples support.
+Wilson, specifically, because it stays well-behaved at `p=0` or `p=1` (the naive normal
+approximation doesn't) — which is exactly where most cells in this report sit.
+
+The report also labels any category where every model scored a clean sweep as
+*saturated, contributes no discriminating evidence* — a 100% column is not the same
+claim as "this model is better here," and the report says which one it actually is.
 
 ## Output
 
@@ -139,8 +173,8 @@ case its id: ids are `<category>_<specific>`, enforced by
 
 | category | probes | cases |
 |---|---|---|
-| `selection` | picking the right tool, including over a near-miss distractor | 5 |
-| `arguments` | filling args correctly — ISO dates, omitting optional ones | 2 |
+| `selection` | picking the right tool, including over a near-miss distractor | 7 |
+| `arguments` | filling args correctly — ISO dates, enum values, omitting optional ones | 4 |
 | `chaining` | multi-step work that depends on reading tool output | 5 |
 | `restraint` | *not* calling a tool when the answer is plain text | 2 |
 | `refusal` | asking instead of fabricating a missing required value | 3 |
@@ -200,13 +234,23 @@ ahead or invents an id fails — even though it called both tools in the right o
 
 ## Where models actually diverge
 
-`refusal` and `chaining` carry the signal. In the 3-model run this was built against,
-every model went 5/5 on `selection` and 2/2 on `arguments`; the entire spread came from
-refusal cases and from one model emitting literal placeholder strings
-(`doc_id_from_search_results`) instead of reading tool output.
+`refusal` and `chaining` carry the signal — confirmed by 3 replicated runs per case,
+not a single sample. In the last full sweep (3 models × 21 cases × 3 runs, 189
+case-runs total), `selection` and `arguments` were saturated at 100% for every
+model — 33/33 and 12/12 respectively, zero variation anywhere in either category
+across all three runs. `restraint` was equally saturated at 18/18.
 
-That is also the argument for the category split: an aggregate "14/17" hides this
-completely.
+Every failing cell in that sweep landed at exactly 0/3 or 3/3 — no cell split its 3
+runs. That matters: it means the observed differences are stable failure modes at
+`temperature=0`, not sampling noise that a rerun would shuffle. Concretely: one model
+went 0/9 on `refusal` and never once asked a clarifying question; another fabricated
+identifiers instead of reading tool output on 2 of 5 chaining cases (`0/3` on each,
+every run); the remaining two models split 3/9 vs 6/9 on refusal, consistently, run
+over run.
+
+That is also the argument for the category split: an aggregate "45/63" hides which of
+those is true, and a bare `k/n` without the replication would leave "is this real or
+noise" an open question instead of a settled one.
 
 ## Adding to the suite
 
@@ -250,28 +294,51 @@ unconditionally).
 
 ## Rate limits
 
-Groq's free tier is roughly 30 requests/minute. `DELAY_BETWEEN_CALLS_SECONDS` spaces
-calls out, and HTTP 429 is retried with backoff, honouring `Retry-After` when the
-server sends it. Set the delay to `0` for a local server.
+Checked directly against Groq's response headers rather than assumed: the binding
+constraint is not a flat requests-per-minute number. For `qwen/qwen3.6-27b` on this
+key, `x-ratelimit-limit-tokens` is 8000/minute and `x-ratelimit-limit-requests` is
+1000/day. Every case sends the full tool schema (4–7 function definitions) plus the
+response, so token spend per call is what exhausts the budget — `qwen` is the model
+that visibly hits 429s in every sweep; `gpt-oss-20b` and `llama-3.3-70b-versatile`
+never have, on the same schedule. Pacing by request count (`DELAY_BETWEEN_CALLS_SECONDS`)
+does not fully prevent this, because the limit isn't request count.
 
-Repeats multiply the call count, not the rate: 21 cases x 3 models x 3 runs is roughly
-190 calls, and the 3s spacing holds that at ~20 requests/minute either way. The sweep
-gets longer (~10 minutes), not denser. Use `--runs 1` with `--cases` for a quick check.
+What actually keeps a sweep working is `client.py` retrying on 429 with backoff,
+honouring the `Retry-After` header Groq sends. That recovers the run; it doesn't avoid
+the throttling. Expect qwen specifically to spend real wall-clock time sitting in
+retries — that's most of why a full sweep takes longer than the raw call count implies.
+Set the delay to `0` for a local server, where this doesn't apply.
+
+Repeats multiply the call count, not the pacing logic: 21 cases × 3 models × 3 runs is
+roughly 190 base calls (more once chaining cases' internal turns are counted). Use
+`--runs 1` with `--cases` for a quick check.
 
 A failed API call is scored as a fail with the error in the notes column — it never
 aborts the sweep, so one flaky model doesn't cost you the whole run.
 
 ## Known limitations
 
+See **Scope** at the top for the three big ones (no MCP protocol, no self-hosted run,
+not a certification). The rest, specific to the current 21-case suite:
+
 - Refusal content is checked by substring keywords, not meaning. A model could satisfy
   `must_mention` while asking something unhelpful, and an unusual-but-correct phrasing
-  can fail until the list is widened. This is the deliberate v1 tradeoff — it stays
-  deterministic and offline-testable. An LLM judge would read intent properly, at the
-  cost of nondeterminism and an API call per case.
-- Adding the refusal-content check changed no verdict on the models tested: every
-  "didn't call a tool" was already a genuine clarifying question. It guards a real hole,
-  but it has not yet caught anything.
-- The `selection` and `arguments` categories are saturated — every model tested passes
-  all 7. They cost API calls and contribute nothing to ranking.
-- The self-hosted path is one config value and is not covered by tests; it has not been
-  run against a live local server.
+  can fail until the list is widened — this already happened once during development
+  (see `must_mention` above). Deliberate v1 tradeoff: stays deterministic and
+  offline-testable. An LLM judge would read intent properly, at the cost of
+  nondeterminism and an API call per case.
+- The `should_refuse` ground truth itself is a judgment call, not derived from a
+  standard. `refusal_relative_date` scores a model as failing if it resolves "next
+  Tuesday" itself rather than asking — a reasonable person could argue a
+  model resolving it from context is being helpful, not wrong. This category carries
+  all of the model-ranking signal in the suite, so a contestable call here has more
+  leverage on the final numbers than any other single design decision in the project.
+  Not yet independently reviewed.
+- `selection`, `arguments`, and `restraint` are saturated — every model tested clears
+  them completely (33/33, 12/12, 18/18 across 3 replicated runs each). `results.md`
+  labels this explicitly per category now, but it also means 11 of 21 cases cost API
+  budget and contribute nothing to ranking as currently written.
+- Wilson intervals describe sampling uncertainty at fixed `temperature=0` output —
+  they say nothing about whether a differently-phrased prompt or a different day's
+  model snapshot would reproduce the same numbers. Repeats answer "is this noise
+  within a run," not "is this stable across prompt variations or model updates."

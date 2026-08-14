@@ -7,7 +7,9 @@ They also pin down the suite's conventions (category names, the `<category>_<spe
 id scheme, grouping) so it can't drift back into ad-hoc naming as cases get added.
 """
 
-from run_eval import CSV_COLUMNS, _fraction, _tally
+import pytest
+
+from run_eval import CSV_COLUMNS, _cell, _fraction, _tally, wilson_interval
 
 CATEGORIES = {"selection", "arguments", "chaining", "restraint", "refusal"}
 
@@ -115,8 +117,8 @@ def test_tally_counts_a_partially_passing_case_partially():
     assert _tally([_row(3, 3), _row(1, 3)]) == (4, 6)
 
 
-def test_fraction_reports_the_run_level_rate():
-    assert _fraction(*_tally([_row(3, 3), _row(1, 3)])) == "4/6 (67%)"
+def test_fraction_reports_the_run_level_rate_and_its_interval():
+    assert _fraction(*_tally([_row(3, 3), _row(1, 3)])) == "4/6 (67%, 30%–90% CI)"
 
 
 def test_fraction_of_nothing_is_a_dash():
@@ -127,3 +129,38 @@ def test_csv_columns_carry_both_run_counts():
     """Dropping either one turns k/n back into an unreadable single number."""
     assert "runs_passed" in CSV_COLUMNS and "runs_total" in CSV_COLUMNS
     assert "result" not in CSV_COLUMNS
+
+
+# --- wilson_interval ---------------------------------------------------------
+# The whole point of adding this: a bare "3/3" reads as proof of 100% reliability.
+# It isn't — these tests pin down how wide the interval actually is at small n, so
+# the report can't quietly go back to overstating a 3-sample result as certainty.
+
+
+def test_wilson_interval_of_perfect_score_is_not_a_point():
+    lo, hi = wilson_interval(3, 3)
+    assert lo == pytest.approx(0.4385, abs=1e-3)
+    assert hi == pytest.approx(1.0, abs=1e-9)
+
+
+def test_wilson_interval_of_zero_score_is_not_a_point():
+    lo, hi = wilson_interval(0, 3)
+    assert lo == pytest.approx(0.0, abs=1e-6)
+    assert hi == pytest.approx(0.5615, abs=1e-3)
+
+
+def test_wilson_interval_of_no_runs_is_degenerate_not_a_crash():
+    assert wilson_interval(0, 0) == (0.0, 0.0)
+
+
+def test_wilson_interval_narrows_as_n_grows():
+    """Same 100% pass rate, more evidence behind it — the interval should shrink."""
+    lo_small, _ = wilson_interval(3, 3)
+    lo_large, _ = wilson_interval(30, 30)
+    assert lo_large > lo_small
+
+
+def test_cell_shows_ci_and_bolds_anything_short_of_a_clean_pass():
+    assert _cell(3, 3) == "3/3 (44%–100%)"
+    assert _cell(0, 3) == "**0/3 (0%–56%)**"
+    assert _cell(2, 3) == "**2/3 (21%–94%)**"
