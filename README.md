@@ -237,6 +237,16 @@ the previous tool's output instead of guessing:
 `doc_114` appears only in the canned `search_documents` result, so a model that skips
 ahead or invents an id fails — even though it called both tools in the right order.
 
+**This is stricter than how established benchmarks grade chains, deliberately.**
+τ-bench doesn't score the tool-call sequence at all — it checks whether the final task
+state ended up correct, regardless of path. BFCL's sequence check only requires the
+calls to be "valid and minimally sufficient," not one exact sequence. This suite
+requires exact name-and-argument matches at every step because there's no real
+environment behind it to check an end state against — `tool_results` are canned JSON,
+not a live system a chain could reach the same correct outcome through a different
+route. A model that finds a legitimately different but equally correct path would fail
+here; that's a real cost of the simulated-environment design, not an oversight.
+
 ## Where models actually diverge
 
 `refusal` and `chaining` carry the signal — confirmed by 3 replicated runs per case,
@@ -252,6 +262,16 @@ went 0/9 on `refusal` and never once asked a clarifying question; another fabric
 identifiers instead of reading tool output on 2 of 5 chaining cases (`0/3` on each,
 every run); the remaining two models split 3/9 vs 6/9 on refusal, consistently, run
 over run.
+
+**Don't read "zero split cells" as proof this suite has no run-to-run variance.**
+LiveMCPBench — a benchmark in the same space — found 23 repeated evaluations of one
+identical setup swing 57.9%–76.8%, a 19-point spread wide enough to reorder a
+leaderboard ([validity audit, arXiv 2607.02577](https://arxiv.org/html/2607.02577v1)).
+Our 3-run replication not splitting could mean these 21 cases are genuinely simpler and
+lower-variance than that benchmark's tasks — plausible, since ours are single- and
+few-step decisions, not long multi-turn agentic runs — or it could mean 3 runs isn't
+enough to catch a rarer variance mode. Both are live possibilities; 3-for-3 is
+suggestive, not a proof of stability.
 
 That is also the argument for the category split: an aggregate "45/63" hides which of
 those is true, and a bare `k/n` without the replication would leave "is this real or
@@ -329,9 +349,16 @@ not a certification). The rest, specific to the current 21-case suite:
 - Refusal content is checked by substring keywords, not meaning. A model could satisfy
   `must_mention` while asking something unhelpful, and an unusual-but-correct phrasing
   can fail until the list is widened — this already happened once during development
-  (see `must_mention` above). Deliberate v1 tradeoff: stays deterministic and
-  offline-testable. An LLM judge would read intent properly, at the cost of
-  nondeterminism and an API call per case.
+  (see `must_mention` above). This is the general class of problem a 2026 validity audit
+  of tool-calling benchmarks measured directly: automated evaluators disagreed with
+  human experts on **18.5% of 496 reviewed tasks**
+  ([arXiv 2607.02577](https://arxiv.org/html/2607.02577v1)). That paper's recommended
+  fix is *not* getting a second human to independently re-label cases — it argues for
+  decomposed, deterministic metrics plus reproducibility checks (repeated runs) over
+  inter-annotator agreement, which is the direction this suite already went with
+  Wilson-interval repeats. Deliberate v1 tradeoff either way: substring matching stays
+  deterministic and offline-testable. An LLM judge would read intent properly, at the
+  cost of nondeterminism and an API call per case.
 - The `should_refuse` ground truth itself is a judgment call, not derived from a
   standard. `refusal_relative_date` scores a model as failing if it resolves "next
   Tuesday" itself rather than asking — a reasonable person could argue a

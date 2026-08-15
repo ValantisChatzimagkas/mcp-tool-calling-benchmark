@@ -89,7 +89,11 @@ the numbers don't support.
    before that section was written — don't repeat that in a summary or a commit message.
 6. **Ground methodology choices in established work, not ad-hoc invention.** The `k/n`
    framing follows τ-bench's `pass^k`. Any future scoring change (e.g. BFCL's
-   AST-vs-executable distinction) cites the approach it borrows.
+   AST-vs-executable distinction) cites the approach it borrows. `score_chain`'s exact
+   sequence-and-args matching is stricter than τ-bench (end-state only) or BFCL
+   ("minimally sufficient," not one fixed path) — documented as a deliberate tradeoff
+   in README's Chain expectations section, not left implicit. If chain scoring changes,
+   keep that comparison current.
 7. **Case/category counts in prose must match `cases.json`, checked, not remembered.**
    README's category table once said 5 selection / 2 arguments after a hardening pass
    had already made it 7/4 — a stale claim, not a lie, but indistinguishable from one to
