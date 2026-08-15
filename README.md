@@ -247,6 +247,19 @@ not a live system a chain could reach the same correct outcome through a differe
 route. A model that finds a legitimately different but equally correct path would fail
 here; that's a real cost of the simulated-environment design, not an oversight.
 
+Checked whether adopting BFCL's looser standard would actually change anything for
+*these* 5 cases, rather than assuming it would: it mostly wouldn't. Most of this
+suite's chains have genuine data dependency, not an order I imposed arbitrarily —
+`chaining_id_from_output` needs the id `search_documents` returns before `get_document`
+can be called at all; `chaining_arg_from_output` needs the organizer's name from the
+calendar lookup before it can message them. Loosening the order check couldn't help
+those cases pass differently; the order is forced by the task, not by the scorer. Only
+`chaining_search_then_task`'s task-creation step doesn't strictly need the prior
+output. Full tau-bench-style end-state checking isn't cheaply portable either — it
+needs an actual stateful backend to check a final state against, which is the larger
+"build a real MCP server with real state" investment discussed and deferred, not a
+scoring tweak.
+
 ## Where models actually diverge
 
 `refusal` and `chaining` carry the signal — confirmed by 3 replicated runs per case,
