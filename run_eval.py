@@ -107,6 +107,8 @@ def run_case_repeated(model, case, tool_registry, runs) -> tuple[int, int, str]:
 
 CSV_COLUMNS = [
     "model",
+    "endpoint",
+    "run_timestamp",
     "case_id",
     "category",
     "case_type",
@@ -173,11 +175,14 @@ CATEGORY_NOTES = {
 }
 
 
-def write_markdown(rows, models, cases, runs, path):
+def write_markdown(rows, models, cases, runs, run_started, path):
     """Run metadata, per-category pass rates, a result matrix, and every failure note.
 
     Every rate is passed runs over total runs, so a case that passes 2 of 3 counts as
     two thirds of a case rather than rounding to a pass or a fail.
+
+    `run_started` must be the same timestamp written into results.csv's rows — one
+    run, one timestamp, so the two files can't disagree about when this happened.
     """
     categories = list(dict.fromkeys(c["category"] for c in cases))
     lookup = {(r["model"], r["case_id"]): r for r in rows}
@@ -186,7 +191,7 @@ def write_markdown(rows, models, cases, runs, path):
     lines += [
         "# MCP tool-calling benchmark",
         "",
-        f"- **Run:** {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}",
+        f"- **Run:** {run_started:%Y-%m-%d %H:%M UTC}",
         f"- **Endpoint:** `{config.API_BASE_URL}`",
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
         f"- **Models:** {len(models)}",
@@ -281,6 +286,12 @@ def main():
     models = args.models or config.MODELS
     rows = []
 
+    # One timestamp for the whole sweep, stamped on every row and on results.md, so
+    # two separately-run sweeps (e.g. Groq today, a self-hosted server next week)
+    # can never be silently merged without the endpoint/time difference showing up
+    # in the data itself — see README's Scope section on why that distinction matters.
+    run_started = datetime.now(timezone.utc)
+
     for model in models:
         print(f"\n=== {model} ({runs} run(s) per case) ===")
         for case in cases:
@@ -290,6 +301,8 @@ def main():
             rows.append(
                 {
                     "model": model,
+                    "endpoint": config.API_BASE_URL,
+                    "run_timestamp": run_started.isoformat(timespec="seconds"),
                     "case_id": case["id"],
                     "category": case["category"],
                     "case_type": case["type"],
@@ -301,7 +314,7 @@ def main():
             time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
 
     write_csv(rows, config.RESULTS_CSV_PATH)
-    write_markdown(rows, models, cases, runs, config.RESULTS_MD_PATH)
+    write_markdown(rows, models, cases, runs, run_started, config.RESULTS_MD_PATH)
     print(f"\nWrote {config.RESULTS_CSV_PATH} and {config.RESULTS_MD_PATH}")
 
 

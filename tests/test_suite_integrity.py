@@ -131,6 +131,14 @@ def test_csv_columns_carry_both_run_counts():
     assert "result" not in CSV_COLUMNS
 
 
+def test_csv_columns_carry_run_provenance():
+    """Without endpoint + timestamp on every row, two separately-run sweeps (e.g. one
+    against Groq, one against a self-hosted server) look identical if merged later —
+    nothing in the data itself would say which rows came from which conditions."""
+    assert "endpoint" in CSV_COLUMNS
+    assert "run_timestamp" in CSV_COLUMNS
+
+
 # --- wilson_interval ---------------------------------------------------------
 # The whole point of adding this: a bare "3/3" reads as proof of 100% reliability.
 # It isn't — these tests pin down how wide the interval actually is at small n, so
