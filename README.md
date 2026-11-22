@@ -62,11 +62,11 @@ From the last full sweep (3 models × 21 cases × 3 runs, Groq-hosted). Details 
 caveats in [docs/findings.md](docs/findings.md).
 
 - `refusal` and `chaining` carry the signal. `selection`, `arguments` and `restraint`
-  were saturated at 100% for every model (33/33, 12/12, 18/18).
+  passed every run for every model, so they contribute no discriminating evidence.
 - Every failing cell landed at exactly 0/3 or 3/3 — stable failure modes at
   `temperature=0`, not sampling noise. One model went 0/9 on `refusal` and never asked a
   clarifying question; another fabricated identifiers instead of reading tool output on
-  2 of 5 chaining cases; the other two split 3/9 vs 6/9 on refusal.
+  2 of 5 chaining cases; the two models other than the first split 3/9 vs 6/9 on refusal.
 - "Zero split cells" with 3 runs is suggestive, not proof of stability.
 
 ## How scoring works

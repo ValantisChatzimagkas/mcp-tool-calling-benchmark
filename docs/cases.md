@@ -49,7 +49,7 @@ Cases are stored grouped by category, so `results.md` reads in a sensible order.
 The two labels overlap today — `chaining` is exactly `multi_call_chain`, `refusal` is
 exactly `should_refuse`, and `category` only genuinely subdivides `single_call` into
 `selection` vs `arguments`. They are kept separate because the overlap is a fact about
-the current 17 cases, not about the design: a chaining case that should refuse
+the current 21 cases, not about the design: a chaining case that should refuse
 mid-chain, or a refusal case where a tool is available and args are partial, both break
 the correlation without needing a schema change.
 

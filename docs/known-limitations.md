@@ -27,8 +27,8 @@ not a certification). The rest, specific to the current 21-case suite:
   leverage on the final numbers than any other single design decision in the project.
   Not yet independently reviewed.
 - `selection`, `arguments`, and `restraint` are saturated — every model tested clears
-  them completely (33/33, 12/12, 18/18 across 3 replicated runs each). `results.md`
-  labels this explicitly per category now, but it also means 11 of 21 cases cost API
+  them completely across 3 replicated runs. `results.md` labels this explicitly per
+  category now, but it also means 13 of 21 cases (7 selection, 4 arguments, 2 restraint) cost API
   budget and contribute nothing to ranking as currently written.
 - Wilson intervals describe sampling uncertainty at fixed `temperature=0` output —
   they say nothing about whether a differently-phrased prompt or a different day's
