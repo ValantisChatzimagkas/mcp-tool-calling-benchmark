@@ -23,7 +23,8 @@ line-length = 100
 
 [tool.ruff.lint]
 select = [
-    "E",   # pycodestyle
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
     "F",   # pyflakes
     "I",   # import sorting
     "UP",  # pyupgrade
