@@ -2,8 +2,8 @@
 .env
 
 # Benchmark output, regenerated on every run
-results.csv
-results.md
+/results.csv
+/results.md
 
 # Python
 __pycache__/
