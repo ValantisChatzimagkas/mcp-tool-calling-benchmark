@@ -91,7 +91,7 @@ Cases are scored by `type` (`single_call`, `multi_call_chain`, `no_call`,
 - [docs/cases.md](docs/cases.md) — case format, types and categories, chain
   expectations, adding cases/categories/models
 - [docs/configuration.md](docs/configuration.md) — layout, settings, self-hosted endpoints
-- [docs/results.md](docs/results.md) — repeated runs, Wilson intervals, output files
+- [docs/output.md](docs/results.md) — repeated runs, Wilson intervals, output files
 - [docs/findings.md](docs/findings.md) — where models actually diverge
 - [docs/rate-limits.md](docs/rate-limits.md) — Groq rate limits and retry behavior
 - [docs/known-limitations.md](docs/known-limitations.md)
