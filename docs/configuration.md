@@ -46,7 +46,8 @@ per-setting env overrides, so a CPU server can't end up paced like Groq's free t
 ### Self-hosted endpoints
 
 Set `BACKEND=ollama` in `.env` (or the environment) and start the server with
-`OLLAMA_CONTEXT_LENGTH=16384`. The harness records the context window it observes on
+`OLLAMA_CONTEXT_LENGTH=16384`. [local-ollama.md](local-ollama.md) has the full setup,
+the machine and the measured results. The harness records the context window it observes on
 every result row. A `.env` that only sets `API_BASE_URL` to a local server keeps the
 `groq` profile's timeout and pacing and is stamped `backend=groq`, so set `BACKEND`.
 

@@ -23,7 +23,7 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 
 | file | holds |
 |---|---|
-| `config.py` | endpoint, key, model list, tuning — the only place these live |
+| `config.py` | backend profiles (`groq`, `ollama`): endpoint, key, model list, tuning — the only place these live |
 | `client.py` | HTTP and response parsing — the only module that touches the network |
 | `scoring.py` | pure pass/fail logic — no I/O, no config |
 | `run_eval.py` | loads the suite, runs cases, writes results, CLI |
@@ -86,8 +86,10 @@ the numbers don't support.
    README's Known limitations. State the assumption alongside the number; don't present
    it as settled.
 5. **Scope every capability claim to what was actually tested.** Results from
-   Groq-hosted inference license "reliable under Groq-hosted inference; the self-hosted
-   serving path is untested" — not "good candidate for self-hosting". See README's Scope
+   Groq-hosted inference license "reliable under Groq-hosted inference"; the Ollama CPU
+   run (`docs/local-ollama.md`: 10 of 21 cases, 1 run each, one laptop) licenses only
+   that scoped sentence, and other serving stacks stay untested — never "good candidate
+   for self-hosting". See README's Scope
    section; it exists because "MCP Tool-Calling Benchmark" oversold what this tests
    before that section was written — don't repeat that in a summary or a commit message.
 6. **Ground methodology choices in established work, not ad-hoc invention.** The `k/n`

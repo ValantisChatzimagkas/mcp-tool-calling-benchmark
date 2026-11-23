@@ -16,7 +16,8 @@ What actually keeps a sweep working is `client.py` retrying on 429 with backoff,
 honouring the `Retry-After` header Groq sends. That recovers the run; it doesn't avoid
 the throttling. Expect qwen specifically to spend real wall-clock time sitting in
 retries — that's most of why a full sweep takes longer than the raw call count implies.
-Set the delay to `0` for a local server, where this doesn't apply.
+The `ollama` profile sets the delay to `0` (and 429 retries to `0`) for a local server,
+where this doesn't apply.
 
 Repeats multiply the call count, not the pacing logic: 21 cases × 3 models × 3 runs is
 roughly 190 base calls (more once chaining cases' internal turns are counted). Use

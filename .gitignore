@@ -4,6 +4,8 @@
 # Benchmark output, regenerated on every run
 /results.csv
 /results.md
+/results-*.csv
+/results-*.md
 /results.journal*.jsonl
 
 # Python

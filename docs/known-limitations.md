@@ -3,8 +3,10 @@
 Back to the [README](../README.md).
 
 
-See **Scope** in the README for the three big ones (no MCP protocol, no self-hosted run,
-not a certification). The rest, specific to the current 21-case suite:
+See **Scope** in the README for the three big ones (no MCP protocol, self-hosting only
+run as a 10-case, 1-run subset on one machine under Ollama — see
+[local-ollama.md](local-ollama.md) — and not a certification). The rest, specific to the
+current 21-case suite:
 
 - Refusal content is checked by substring keywords, not meaning. A model could satisfy
   `must_mention` while asking something unhelpful, and an unusual-but-correct phrasing
@@ -26,8 +28,10 @@ not a certification). The rest, specific to the current 21-case suite:
   all of the model-ranking signal in the suite, so a contestable call here has more
   leverage on the final numbers than any other single design decision in the project.
   Not yet independently reviewed.
-- `selection`, `arguments`, and `restraint` are saturated — every model tested clears
-  them completely across 3 replicated runs. `results.md` labels this explicitly per
+- `selection`, `arguments`, and `restraint` are saturated — every model tested in the
+  Groq sweep clears them completely across 3 replicated runs (the two local Qwen3
+  models also passed every run of the 2 cases per category they were given, 1 run each,
+  which is weaker evidence). `results.md` labels this explicitly per
   category now, but it also means 13 of 21 cases (7 selection, 4 arguments, 2 restraint) cost API
   budget and contribute nothing to ranking as currently written.
 - Wilson intervals describe sampling uncertainty at fixed `temperature=0` output —
