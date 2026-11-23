@@ -8,9 +8,14 @@ Back to the [README](../README.md).
 config.py     endpoint, key, model list, tuning — the only place these live
 client.py     HTTP and response parsing — the only module that touches the network
 scoring.py    pure pass/fail logic — no I/O, no config, fully unit-tested
+mcp_client.py spawns local stdio MCP servers; tools/list, tools/call (opens no sockets)
+sandbox.py    per-run temp sandboxes, pinned server installs, bwrap confinement argv
 run_eval.py   loads the suite, runs cases, writes results, CLI
 cases.json    the benchmark suite (data, not code)
-tests/        pytest — scoring logic, plus checks on cases.json itself
+mcp_smoke.json server-backed smoke cases, run with --suite
+fixtures/     seed data copied into each run's sandbox
+.mcp-servers/ pinned server installs (gitignored, created on first use)
+tests/        pytest — scoring logic, suite integrity, MCP facade; `-m live` for real servers
 ```
 
 Two words that look alike here mean different things: a **case** is a benchmark case
@@ -29,6 +34,11 @@ URL. That is what lets the same script hit a local server unchanged.
 | `RUNS_PER_CASE` | runs per (model, case); `--runs` overrides it per invocation |
 | `DELAY_BETWEEN_CALLS_SECONDS` | rate-limit spacing (see below) |
 | `MAX_CHAIN_STEPS` | turn budget for a `multi_call_chain` case |
+| `MCP_SERVER_KINDS` | server-backed cases: pinned install spec, runtime and launch line per kind |
+| `MCP_SERVERS_DIR` | where pinned servers are installed (`.mcp-servers`) |
+| `FIXTURES_DIR` | seed data for server-backed cases (`fixtures`) |
+| `MCP_CONFINEMENT` | `"bwrap"` (default; fails loudly if missing) or `"none"` (explicit opt-out) |
+| `MCP_STARTUP_TIMEOUT_SECONDS` / `MCP_CALL_TIMEOUT_SECONDS` / `MCP_SHUTDOWN_TIMEOUT_SECONDS` | bounds on server startup, one `tools/call`, and teardown |
 
 ### Self-hosted endpoints
 

@@ -1,0 +1,3 @@
+- Renew the staging TLS certificate before Friday
+- Reply to Elena about the Q2 budget
+- Archive the old onboarding docs

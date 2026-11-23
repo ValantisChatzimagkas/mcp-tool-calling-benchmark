@@ -16,13 +16,18 @@ create-task call, and so on).
 
 **What this does not test:**
 
-- **The MCP protocol itself.** No JSON-RPC, no `tools/list` / `tools/call`, no running
-  MCP server anywhere in this repo. Tool schemas are hand-authored dicts in
-  `cases.json`, sent directly as OpenAI-format `tools`. A real MCP server's schemas are
-  known to be messier than hand-written ones ([BFCL v4's own
-  notes say so](https://gorilla.cs.berkeley.edu/leaderboard.html)), and multi-server
-  tool-namespace collisions aren't modeled at all — this suite has one flat tool
-  registry. Both are plausible sources of failure this benchmark cannot see.
+- **The MCP protocol, beyond a small stdio slice.** The main sweep (`cases.json`, 21
+  cases) uses hand-authored tool schemas sent directly as OpenAI-format `tools` and
+  canned tool results: no JSON-RPC, no `tools/list` / `tools/call`, no MCP server. A
+  real MCP server's schemas are known to be messier than hand-written ones ([BFCL v4's
+  own notes say so](https://gorilla.cs.berkeley.edu/leaderboard.html)), and
+  multi-server tool-namespace collisions aren't modeled there — both are plausible
+  sources of failure that sweep cannot see. The only protocol coverage is the 3
+  server-backed smoke cases in `mcp_smoke.json` (`--suite`): they start pinned
+  reference servers (filesystem, sqlite) over **stdio**, offer the model their real
+  `tools/list` schemas under `<server>__<tool>` names (two filesystem servers collide
+  on tool names), and execute its calls with `tools/call`. That is a smoke test of the
+  path, not a sweep: HTTP/SSE transport, resources, prompts and auth are not exercised.
 - **The actual self-hosted stack.** Every result so far ran against Groq's hosted
   inference. `API_BASE_URL` can point at llama.cpp/Ollama with one `.env` line, but that
   path has not actually been exercised. Quantization and serving differences could shift
@@ -49,7 +54,17 @@ uv run run_eval.py
 uv run run_eval.py --models openai/gpt-oss-20b     # one model
 uv run run_eval.py --cases cal_lookup_basic        # one case, all models
 uv run run_eval.py --runs 1                        # one run per case, for a smoke test
+uv run run_eval.py --suite mcp_smoke.json --runs 1 # server-backed cases against real MCP servers
 ```
+
+Server-backed cases need `node`/`npm`, `uv` and `bwrap` (bubblewrap) on `PATH`, plus
+network for a one-time install of the pinned servers into the gitignored
+`.mcp-servers/`. Each server runs from that install under bwrap with no network, no
+session bus, `$HOME` and the temp dir masked, and one writable directory (the run's own
+sandbox, seeded from `fixtures/`). What remains is exactly this: the OS tree (`/usr`,
+`/etc`, `/var`, …) is read-only and readable, because a process can't run without it.
+Set `MCP_CONFINEMENT = "none"` in `config.py` to opt out explicitly on a platform
+without bwrap; there is no silent fallback.
 
 Each (model, case) pair runs 3 times by default and reports `k/n` with a 95% Wilson
 interval. Results go to `results.csv` and `results.md` (both gitignored). For a
@@ -99,7 +114,8 @@ Cases are scored by `type` (`single_call`, `multi_call_chain`, `no_call`,
 ## Development
 
 ```bash
-uv run pytest          # scoring tests, offline, <1s
+uv run pytest          # offline: scoring, suite integrity, MCP facade over a fake server
+uv run pytest -m live  # real servers + bwrap escape tests (needs node/npm, uv, bwrap)
 uv run ruff check .
 uv run ruff format .
 ```
