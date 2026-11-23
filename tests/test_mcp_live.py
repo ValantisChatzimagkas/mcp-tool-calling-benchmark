@@ -239,7 +239,6 @@ def _gold_steps(case):
     return case["expected_tool_call"].get("sequence", [case["expected_tool_call"]])
 
 
-@pytest.mark.xfail(strict=True, reason="SOL-103 phase 3 adds the cases")
 def test_live_registry_exposes_at_least_20_tools(bwrap_only):
     cases = _suite_cases("registry")
     assert cases, "no registry cases in cases.json"
@@ -248,7 +247,6 @@ def test_live_registry_exposes_at_least_20_tools(bwrap_only):
             assert len(tools) >= 20, f"{case['id']}: only {len(tools)} tools"
 
 
-@pytest.mark.xfail(strict=True, reason="SOL-103 phase 3 adds the cases")
 def test_live_gold_paths_execute_against_real_servers(bwrap_only):
     cases = _suite_cases(*NEW_CATEGORIES)
     assert cases, "no server_chaining/registry/collision cases in cases.json"

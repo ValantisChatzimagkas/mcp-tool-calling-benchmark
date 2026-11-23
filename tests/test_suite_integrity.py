@@ -28,10 +28,6 @@ CATEGORIES = {
 }
 
 
-# Strict xfail: these fail until the SOL-103 cases land, and an early pass is an error.
-NEW_CATEGORY_XFAIL = pytest.mark.xfail(strict=True, reason="SOL-103 phase 3 adds the cases")
-
-
 def test_case_ids_are_unique(suite):
     ids = [c["id"] for c in suite["cases"]]
     assert len(ids) == len(set(ids))
@@ -107,7 +103,6 @@ def test_every_should_refuse_case_declares_what_is_missing(suite):
         assert spec.get("must_mention"), f"{case['id']}: expected_refusal names nothing"
 
 
-@NEW_CATEGORY_XFAIL
 def test_every_category_has_at_least_one_case(main_suite):
     """A category that exists only in docs is a gap in the suite, not a category."""
     present = {case["category"] for case in main_suite["cases"]}
@@ -226,7 +221,6 @@ def _steps(case):
     return [expected]
 
 
-@NEW_CATEGORY_XFAIL
 def test_registry_cases_expose_every_tool(main_suite):
     """A registry case's point is a large tool list: no allow-list, several server kinds."""
     for case in _category_cases(main_suite, "registry"):
@@ -239,7 +233,6 @@ def test_registry_cases_expose_every_tool(main_suite):
         assert not filtered, f"{case['id']}: allow-list on {filtered} shrinks the registry"
 
 
-@NEW_CATEGORY_XFAIL
 def test_collision_cases_have_exactly_one_correct_server(main_suite):
     """Two servers expose the expected tool name; only the expected one has the answer."""
     root = Path(config.FIXTURES_DIR)
@@ -278,7 +271,6 @@ def test_collision_cases_have_exactly_one_correct_server(main_suite):
                     )
 
 
-@NEW_CATEGORY_XFAIL
 def test_server_chaining_cases_use_real_output(main_suite):
     """The last step's `content` must be pinned (in `args`, not loose): the model can only
     know it by reading the real output of an earlier step."""
@@ -306,7 +298,6 @@ def test_loose_args_are_listed_in_args(suite):
             assert not missing, f"{case['id']}: loose_args {sorted(missing)} not in args"
 
 
-@NEW_CATEGORY_XFAIL
 def test_suite_size_within_sweep_budget(main_suite):
     """SOL-105's overnight sweep has to fit one run: keep the suite within 15-20 cases."""
     size = len(main_suite["cases"])
