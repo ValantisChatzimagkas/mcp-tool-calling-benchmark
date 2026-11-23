@@ -45,3 +45,9 @@ RETRY_BACKOFF_SECONDS = 20
 MCP_STARTUP_TIMEOUT_SECONDS = 60
 MCP_CALL_TIMEOUT_SECONDS = 30
 MCP_SHUTDOWN_TIMEOUT_SECONDS = 10
+
+# Where server-backed cases find their seed data, and how their servers are launched.
+# Each kind: {"command", "args" ("{path}" is the server's sandbox path), "seed": "dir"|"sql"}.
+FIXTURES_DIR = "fixtures"
+MCP_CONFINEMENT = "bwrap"
+MCP_SERVER_KINDS = {}

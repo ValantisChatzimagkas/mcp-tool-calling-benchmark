@@ -9,27 +9,36 @@ import argparse
 import csv
 import json
 import math
+import re
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import config
 from client import ApiError, chat, parse_tool_calls
+from mcp_client import McpServerError, McpServers, ServerSpec
+from sandbox import open_sandbox
 from scoring import score_chain, score_no_call, score_refusal, score_single_call
 
 
 def load_suite(path):
-    """Read cases.json. Returns (tool_registry, cases)."""
+    """Read a suite file. Returns (tool_registry, cases); the registry may be empty."""
     with open(path) as f:
         suite = json.load(f)
-    return suite["tools"], suite["cases"]
+    return suite.get("tools", {}), suite["cases"]
 
 
-def run_chain(model, case, tools):
-    """Drive a multi-turn tool loop with canned tool results; return calls in order."""
+def canned_executor(case):
+    """Executor for classic cases: the canned `tool_results` entry, or "{}" if unlisted."""
+    canned = case.get("tool_results", {})
+    return lambda name, call_args: canned.get(name, "{}")
+
+
+def run_chain(model, case, tools, execute):
+    """Drive a multi-turn tool loop; `execute(name, args)` supplies each tool result."""
     messages = [{"role": "user", "content": case["prompt"]}]
     observed = []
-    canned = case.get("tool_results", {})
 
     for _ in range(config.MAX_CHAIN_STEPS):
         message = chat(model, messages, tools)
@@ -50,7 +59,7 @@ def run_chain(model, case, tools):
                 {
                     "role": "tool",
                     "tool_call_id": raw.get("id", ""),
-                    "content": canned.get(name, "{}"),
+                    "content": execute(name, call_args),
                 }
             )
         time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
@@ -58,12 +67,43 @@ def run_chain(model, case, tools):
     return observed
 
 
-def run_case(model, case, tool_registry) -> tuple[bool, str]:
-    """Run one case against one model and score it."""
-    tools = [tool_registry[name] for name in case["available_tools"]]
+_PLACEHOLDER = re.compile(r"\$\{([^}]*)\}")
 
+
+def substitute_paths(value, paths):
+    """Replace `${server}` with that server's sandbox path throughout a str/list/dict.
+
+    An unknown name raises KeyError: a typo must fail the run, not pass an unsubstituted
+    string through to scoring.
+    """
+    if isinstance(value, str):
+        return _PLACEHOLDER.sub(lambda m: str(paths[m.group(1)]), value)
+    if isinstance(value, list):
+        return [substitute_paths(item, paths) for item in value]
+    if isinstance(value, dict):
+        return {key: substitute_paths(item, paths) for key, item in value.items()}
+    return value
+
+
+@contextmanager
+def open_mcp_case(case):
+    """Start a case's servers in a fresh sandbox. Yields (tools, execute, paths)."""
+    kinds = config.MCP_SERVER_KINDS
+    servers = case["mcp_servers"]
+    with open_sandbox(servers, kinds, config.FIXTURES_DIR) as sandbox:
+        specs = []
+        for name, server in servers.items():
+            kind = kinds[server["kind"]]
+            path = str(sandbox.paths[name])
+            args = [arg.replace("{path}", path) for arg in kind["args"]]
+            specs.append(ServerSpec(name, kind["command"], args, server.get("tools")))
+        with McpServers(specs) as running:
+            yield running.tools, running.call, sandbox.paths
+
+
+def _score_case(model, case, tools, execute) -> tuple[bool, str]:
     if case["type"] == "multi_call_chain":
-        observed = run_chain(model, case, tools)
+        observed = run_chain(model, case, tools, execute)
         return score_chain(observed, case["expected_tool_call"]["sequence"])
 
     message = chat(model, [{"role": "user", "content": case["prompt"]}], tools)
@@ -76,6 +116,24 @@ def run_case(model, case, tool_registry) -> tuple[bool, str]:
     if case["type"] == "no_call":
         return score_no_call(calls, message)
     return False, f"unknown case type: {case['type']}"
+
+
+def run_case(model, case, tool_registry) -> tuple[bool, str]:
+    """Run one case against one model and score it.
+
+    A case either lists hand-written `available_tools` (canned results) or declares
+    `mcp_servers` (real tools, executed through `tools/call` in a per-run sandbox).
+    """
+    if "mcp_servers" in case:
+        with open_mcp_case(case) as (tools, execute, paths):
+            resolved = dict(case)
+            for key in ("prompt", "expected_tool_call", "expected_refusal"):
+                if key in resolved:
+                    resolved[key] = substitute_paths(resolved[key], paths)
+            return _score_case(model, resolved, tools, execute)
+
+    tools = [tool_registry[name] for name in case["available_tools"]]
+    return _score_case(model, case, tools, canned_executor(case))
 
 
 def summarize_runs(results) -> tuple[int, int, str]:
@@ -98,6 +156,8 @@ def run_case_repeated(model, case, tool_registry, runs) -> tuple[int, int, str]:
             results.append(run_case(model, case, tool_registry))
         except ApiError as exc:
             results.append((False, f"api error: {exc}"))
+        except McpServerError as exc:
+            results.append((False, f"mcp server error: {exc}"))
         except Exception as exc:  # a broken case must not kill the sweep
             results.append((False, f"{type(exc).__name__}: {exc}"))
         if index < runs - 1:
@@ -175,7 +235,7 @@ CATEGORY_NOTES = {
 }
 
 
-def write_markdown(rows, models, cases, runs, run_started, path):
+def write_markdown(rows, models, cases, runs, run_started, path, suite_path):
     """Run metadata, per-category pass rates, a result matrix, and every failure note.
 
     Every rate is passed runs over total runs, so a case that passes 2 of 3 counts as
@@ -193,6 +253,7 @@ def write_markdown(rows, models, cases, runs, run_started, path):
         "",
         f"- **Run:** {run_started:%Y-%m-%d %H:%M UTC}",
         f"- **Endpoint:** `{config.API_BASE_URL}`",
+        f"- **Suite:** `{suite_path}`",
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
         f"- **Models:** {len(models)}",
         f"- **Runs per case:** {runs}",
@@ -265,6 +326,11 @@ def main():
         type=int,
         help=f"runs per (model, case); overrides RUNS_PER_CASE={config.RUNS_PER_CASE}",
     )
+    parser.add_argument(
+        "--suite",
+        default=config.CASES_PATH,
+        help=f"suite file to run (default {config.CASES_PATH})",
+    )
     args = parser.parse_args()
 
     runs = args.runs if args.runs is not None else config.RUNS_PER_CASE
@@ -274,7 +340,7 @@ def main():
     if not config.API_KEY and "localhost" not in config.API_BASE_URL:
         sys.exit("GROQ_API_KEY is not set — copy .env.example to .env and fill it in.")
 
-    tool_registry, all_cases = load_suite(config.CASES_PATH)
+    tool_registry, all_cases = load_suite(args.suite)
     cases = all_cases
     if args.cases:
         wanted = set(args.cases)
@@ -314,7 +380,7 @@ def main():
             time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
 
     write_csv(rows, config.RESULTS_CSV_PATH)
-    write_markdown(rows, models, cases, runs, run_started, config.RESULTS_MD_PATH)
+    write_markdown(rows, models, cases, runs, run_started, config.RESULTS_MD_PATH, args.suite)
     print(f"\nWrote {config.RESULTS_CSV_PATH} and {config.RESULTS_MD_PATH}")
 
 
