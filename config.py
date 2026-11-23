@@ -39,3 +39,9 @@ RUNS_PER_CASE = 3
 DELAY_BETWEEN_CALLS_SECONDS = 3.0
 MAX_RETRIES_ON_429 = 3
 RETRY_BACKOFF_SECONDS = 20
+
+# Local stdio MCP servers (server-backed cases). A server that can't start in time, or a
+# call that doesn't return in time, fails that run with an `mcp server error:` note.
+MCP_STARTUP_TIMEOUT_SECONDS = 60
+MCP_CALL_TIMEOUT_SECONDS = 30
+MCP_SHUTDOWN_TIMEOUT_SECONDS = 10
