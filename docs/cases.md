@@ -9,14 +9,15 @@ function schemas, keyed by name) and `cases` (which reference tools by name).
 
 ```json
 {
-  "id": "selection_calendar_lookup",
+  "id": "selection_search_vs_lookup",
   "type": "single_call",
   "category": "selection",
-  "prompt": "What's on maria's calendar on 2026-03-12?",
-  "available_tools": ["calendar_lookup", "search_documents", "create_task"],
+  "prompt": "Maria has a design review booked sometime this year but I don't know which day. Find it.",
+  "available_tools": ["search_calendar", "calendar_lookup", "search_documents"],
   "expected_tool_call": {
-    "name": "calendar_lookup",
-    "args": { "person": "maria", "date": "2026-03-12" }
+    "name": "search_calendar",
+    "args": { "person": "maria", "query": "design review" },
+    "loose_args": ["query"]
   }
 }
 ```
@@ -38,8 +39,8 @@ case its id: ids are `<category>_<specific>`, enforced by
 
 | category | probes | cases |
 |---|---|---|
-| `selection` | picking the right tool, including over a near-miss distractor | 7 |
-| `arguments` | filling args correctly — ISO dates, enum values, omitting optional ones | 4 |
+| `selection` | picking the right tool, including over a near-miss distractor | 2 |
+| `arguments` | filling args correctly — ISO dates, omitting optional ones | 2 |
 | `chaining` | multi-step work that depends on reading tool output | 5 |
 | `restraint` | *not* calling a tool when the answer is plain text | 2 |
 | `refusal` | asking instead of fabricating a missing required value | 3 |
@@ -166,6 +167,19 @@ registry:
   it at least one case. Reporting picks it up automatically from the data.
 - **New model** — append to `MODELS` in `config.py`, or pass `--models` at runtime.
 
-Coverage is uneven by design-so-far, not by intent: `arguments` and `restraint` have
-only two cases each. Those are the obvious places to add.
+## Removed cases
 
+SOL-103 cut `selection` from 7 cases to 2 and `arguments` from 4 to 2. All seven passed
+3/3 for all three models in the last full sweep (see [findings](findings.md)), so they
+contributed no discriminating evidence. Each is listed with what it tested and which
+kept case still covers it.
+
+| removed case | what it tested | still covered by |
+|---|---|---|
+| `selection_calendar_lookup` | direct single-tool pick among 3 | `selection_search_vs_lookup` (near-miss distractor) |
+| `selection_create_task` | direct `create_task` pick among unrelated tools | `selection_update_vs_create` |
+| `selection_search_before_fetch` | `search_documents` over `get_document` when only a title is given | `selection_search_vs_lookup` |
+| `selection_search_documents` | direct `search_documents` pick among unrelated tools | `selection_search_vs_lookup` |
+| `selection_task_vs_reminder` | `create_task` over `create_reminder` / `update_task` | `selection_update_vs_create` |
+| `arguments_enum_value` | filling an enum value (`in_progress`) | `arguments_omit_optional` (`forbidden_args`) |
+| `arguments_verbatim_recipient` | string passthrough to `recipient` | `arguments_date_to_iso` (exact-value checking) |

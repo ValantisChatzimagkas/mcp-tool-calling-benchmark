@@ -8,6 +8,7 @@ id scheme, grouping) so it can't drift back into ad-hoc naming as cases get adde
 """
 
 import re
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -97,6 +98,14 @@ def test_every_category_has_at_least_one_case(main_suite):
     """A category that exists only in docs is a gap in the suite, not a category."""
     present = {case["category"] for case in main_suite["cases"]}
     assert present == CATEGORIES, f"unused categories: {sorted(CATEGORIES - present)}"
+
+
+def test_sanity_categories_are_capped(main_suite):
+    """selection, arguments and restraint passed every run for every model, so they stay
+    as ≤2-case sanity checks; the discriminating weight belongs to the other categories."""
+    counts = Counter(case["category"] for case in main_suite["cases"])
+    for category in ("selection", "arguments", "restraint"):
+        assert counts[category] <= 2, f"{category} has {counts[category]} cases, cap is 2"
 
 
 # --- server-backed cases ------------------------------------------------------

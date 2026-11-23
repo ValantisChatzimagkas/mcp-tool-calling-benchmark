@@ -271,7 +271,7 @@ def test_results_md_names_default_suite(tmp_path, monkeypatch):
     _, md_path = _run_main(
         monkeypatch,
         tmp_path,
-        ["--models", "m", "--runs", "1", "--cases", "selection_calendar_lookup"],
+        ["--models", "m", "--runs", "1", "--cases", "selection_search_vs_lookup"],
     )
 
     assert "- **Suite:** `cases.json`" in md_path.read_text()
