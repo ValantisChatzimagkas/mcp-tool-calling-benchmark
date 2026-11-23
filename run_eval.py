@@ -14,7 +14,7 @@ import time
 from datetime import datetime, timezone
 
 import config
-from client import ApiError, chat, parse_tool_calls
+from client import ApiError, chat, describe_model, loaded_context_length, parse_tool_calls
 from scoring import score_chain, score_no_call, score_refusal, score_single_call
 
 
@@ -107,11 +107,15 @@ def run_case_repeated(model, case, tool_registry, runs) -> tuple[int, int, str]:
 
 CSV_COLUMNS = [
     "model",
+    "backend",
     "endpoint",
+    "quantization",
+    "context_length",
     "run_timestamp",
     "case_id",
     "category",
     "case_type",
+    "status",
     "runs_passed",
     "runs_total",
     "notes",
@@ -169,7 +173,8 @@ def _cell(passed, total):
 CATEGORY_NOTES = {
     "refusal": (
         "Scored by `must_mention` keyword lists in cases.json, calibrated against "
-        "responses actually observed from these 3 models — not a systematic process. "
+        "responses actually observed from the 3 Groq-hosted models in README's Key "
+        "findings — not a systematic process. "
         "A correct refusal phrased unusually by an untested model could false-fail here."
     ),
 }
@@ -180,6 +185,9 @@ def write_markdown(rows, models, cases, runs, run_started, path):
 
     Every rate is passed runs over total runs, so a case that passes 2 of 3 counts as
     two thirds of a case rather than rounding to a pass or a fail.
+
+    The `## Models` table says what each model tag was actually served as (quantization,
+    context window), read from the rows so it can't disagree with results.csv.
 
     `run_started` must be the same timestamp written into results.csv's rows — one
     run, one timestamp, so the two files can't disagree about when this happened.
@@ -192,6 +200,7 @@ def write_markdown(rows, models, cases, runs, run_started, path):
         "# MCP tool-calling benchmark",
         "",
         f"- **Run:** {run_started:%Y-%m-%d %H:%M UTC}",
+        f"- **Backend:** `{config.BACKEND}`",
         f"- **Endpoint:** `{config.API_BASE_URL}`",
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
         f"- **Models:** {len(models)}",
@@ -200,6 +209,18 @@ def write_markdown(rows, models, cases, runs, run_started, path):
         f"{runs} run(s) per case these are wide by nature — a clean k/n is not "
         "proof of reliability, it's a sample. See README's Scope section before "
         "treating any single number here as a verdict.",
+        "",
+        "## Models",
+        "",
+        "| model | backend | quantization | context_length |",
+        "|---|---|---|---|",
+    ]
+    for model in models:
+        model_rows = [r for r in rows if r["model"] == model]
+        context = next((r["context_length"] for r in model_rows if r["context_length"]), "")
+        quantization = model_rows[0]["quantization"] if model_rows else "unknown"
+        lines.append(f"| `{model}` | {config.BACKEND} | {quantization} | {context or '—'} |")
+    lines += [
         "",
         "## Pass rate",
         "",
@@ -256,7 +277,7 @@ def write_markdown(rows, models, cases, runs, run_started, path):
         f.write("\n".join(lines) + "\n")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="+", help="override the model list in config")
     parser.add_argument("--cases", nargs="+", help="only run these case ids")
@@ -265,14 +286,17 @@ def main():
         type=int,
         help=f"runs per (model, case); overrides RUNS_PER_CASE={config.RUNS_PER_CASE}",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     runs = args.runs if args.runs is not None else config.RUNS_PER_CASE
     if runs < 1:
         sys.exit("--runs must be at least 1")
 
-    if not config.API_KEY and "localhost" not in config.API_BASE_URL:
-        sys.exit("GROQ_API_KEY is not set — copy .env.example to .env and fill it in.")
+    if config.REQUIRES_API_KEY and not config.API_KEY:
+        sys.exit(
+            "GROQ_API_KEY is not set — copy .env.example to .env and fill it in. "
+            "For a local Ollama server set BACKEND=ollama instead."
+        )
 
     tool_registry, all_cases = load_suite(config.CASES_PATH)
     cases = all_cases
@@ -284,12 +308,23 @@ def main():
             sys.exit(f"unknown case id(s): {', '.join(sorted(missing))}")
 
     models = args.models or config.MODELS
+
+    # Ask the server about every model before running any case: an unpulled model or a
+    # server that is down should stop the sweep now, not after an hour of other work.
+    infos = {}
+    for model in models:
+        try:
+            infos[model] = describe_model(model)
+        except ApiError as exc:
+            sys.exit(f"cannot describe model {model}: {exc}")
+
     rows = []
+    context_lengths = {}
 
     # One timestamp for the whole sweep, stamped on every row and on results.md, so
-    # two separately-run sweeps (e.g. Groq today, a self-hosted server next week)
-    # can never be silently merged without the endpoint/time difference showing up
-    # in the data itself — see README's Scope section on why that distinction matters.
+    # two separately-run sweeps (e.g. Groq today, a self-hosted server next week) can
+    # never be silently merged without the endpoint/time difference showing up in the
+    # data itself — see README's Scope section on why that distinction matters.
     run_started = datetime.now(timezone.utc)
 
     for model in models:
@@ -297,15 +332,23 @@ def main():
         for case in cases:
             passed, total, notes = run_case_repeated(model, case, tool_registry, runs)
 
+            # The model is loaded by now, so /api/ps can say what context it got.
+            if context_lengths.get(model) is None:
+                context_lengths[model] = loaded_context_length(model)
+
             print(f"  [{passed}/{total}] {case['id']:<24} {notes}")
             rows.append(
                 {
                     "model": model,
+                    "backend": config.BACKEND,
                     "endpoint": config.API_BASE_URL,
+                    "quantization": infos[model].quantization,
+                    "context_length": context_lengths[model] or "",
                     "run_timestamp": run_started.isoformat(timespec="seconds"),
                     "case_id": case["id"],
                     "category": case["category"],
                     "case_type": case["type"],
+                    "status": "ok",
                     "runs_passed": passed,
                     "runs_total": total,
                     "notes": notes,

@@ -34,13 +34,17 @@ Progress prints live as it runs, with the per-case run count in the left column:
 Two files are written at the end (both gitignored — they are regenerated every run):
 
 - `results.csv` — one row per (model, case):
-  `model, endpoint, run_timestamp, case_id, category, case_type, runs_passed,
-  runs_total, notes`. Every row from one sweep carries the same `endpoint` and
-  `run_timestamp` — the point is that if you save two CSVs from different sweeps
-  (Groq today, a self-hosted server next week) and later merge or paste them together,
-  the difference in conditions is in the data, not just in a header you might not have
-  kept. The two counts are plain integers; `notes` holds the deduped notes from the
-  failing runs.
+  `model, backend, endpoint, quantization, context_length, run_timestamp, case_id,
+  category, case_type, status, runs_passed, runs_total, notes`. Every row from one
+  sweep carries the same `backend`, `endpoint` and `run_timestamp` — the point is that
+  if you save two CSVs from different sweeps (Groq today, a self-hosted server next
+  week) and later merge or paste them together, the difference in conditions is in the
+  data, not just in a header you might not have kept. `model` is the tag as the server
+  knows it; `quantization` is what the server reported it loaded (`qwen3:4b` says
+  nothing about Q4 vs Q8 on its own; `unknown (hosted)` for Groq, which doesn't expose
+  it) and `context_length` is the context window the server actually loaded the model
+  with, observed rather than configured (empty when unknown). The two counts are plain
+  integers; `notes` holds the deduped notes from the failing runs.
 - `results.md` — run metadata, a pass-rate table broken down by category, the full
   result matrix grouped by category (`passed/total` per cell), and every failure note
 

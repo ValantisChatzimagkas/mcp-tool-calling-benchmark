@@ -1,7 +1,9 @@
 """Talking to the model endpoint. Everything network-facing lives here."""
 
 import json
+import re
 import time
+from typing import NamedTuple
 
 import requests
 
@@ -10,6 +12,26 @@ import config
 
 class ApiError(Exception):
     """Any failure talking to the endpoint. Scored as a failed case, never fatal."""
+
+
+class ModelInfo(NamedTuple):
+    """What the server says about a model that the model tag alone doesn't."""
+
+    quantization: str
+    supports_tools: bool
+
+
+# Reasoning models (Qwen3 under Ollama) may inline their chain of thought in `content`.
+# Scoring reads `content` for question marks and keywords, so a leading reasoning block
+# would let "who is the recipient?" inside <think> pass a refusal the answer never made.
+_LEADING_THINK = re.compile(r"\A\s*<think>.*?</think>\s*", re.DOTALL)
+
+
+def strip_leading_think(content):
+    """Drop one leading <think>…</think> block (and the whitespace after it)."""
+    if not isinstance(content, str):
+        return content
+    return _LEADING_THINK.sub("", content, count=1)
 
 
 def chat(model, messages, tools):
@@ -49,11 +71,64 @@ def chat(model, messages, tools):
 
         body = response.json()
         try:
-            return body["choices"][0]["message"]
+            message = body["choices"][0]["message"]
         except (KeyError, IndexError) as exc:
             raise ApiError(f"unexpected response shape: {json.dumps(body)[:200]}") from exc
+        if "content" in message:
+            message["content"] = strip_leading_think(message["content"])
+        return message
 
     raise ApiError("rate limited, retries exhausted")
+
+
+def describe_model(model) -> ModelInfo:
+    """Quantization and tool support, as the server reports them.
+
+    Read from the server rather than declared in config: `qwen3:4b` carries no
+    quantization in its tag, so only what the server actually loaded can label a run.
+    A server that omits `capabilities` is treated as supporting tools (an old Ollama
+    can't say otherwise) and one that omits the quantization reports "unknown".
+    """
+    if config.NATIVE_API is None:
+        return ModelInfo("unknown (hosted)", True)
+
+    try:
+        response = requests.post(
+            f"{config.API_ROOT}/api/show",
+            json={"model": model},
+            timeout=config.REQUEST_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        raise ApiError(f"request failed: {type(exc).__name__}: {exc}") from exc
+    if response.status_code != 200:
+        raise ApiError(f"HTTP {response.status_code}: {response.text[:200]}")
+
+    body = response.json()
+    quantization = (body.get("details") or {}).get("quantization_level") or "unknown"
+    capabilities = body.get("capabilities")
+    supports_tools = True if capabilities is None else "tools" in capabilities
+    return ModelInfo(quantization, supports_tools)
+
+
+def loaded_context_length(model):
+    """The context window the server actually loaded `model` with, or None.
+
+    The server's OLLAMA_CONTEXT_LENGTH is invisible to the harness, so each result row
+    records what was observed. Never raises: a missing value is data, not a failure.
+    """
+    if config.NATIVE_API is None:
+        return None
+    try:
+        response = requests.get(f"{config.API_ROOT}/api/ps", timeout=config.REQUEST_TIMEOUT_SECONDS)
+        if response.status_code != 200:
+            return None
+        for entry in response.json().get("models", []):
+            if model in (entry.get("name"), entry.get("model")):
+                value = entry.get("context_length")
+                return value if isinstance(value, int) else None
+    except (requests.RequestException, ValueError, AttributeError):
+        return None
+    return None
 
 
 def parse_tool_calls(message):

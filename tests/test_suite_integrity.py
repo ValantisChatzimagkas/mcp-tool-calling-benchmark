@@ -139,6 +139,13 @@ def test_csv_columns_carry_run_provenance():
     assert "run_timestamp" in CSV_COLUMNS
 
 
+def test_csv_columns_carry_backend_quantization_context_status():
+    """Quantization and context window both change tool-calling behaviour, and the
+    model tag alone carries neither (`qwen3:4b` says nothing about Q4 vs Q8)."""
+    for column in ("backend", "quantization", "context_length", "status"):
+        assert column in CSV_COLUMNS
+
+
 # --- wilson_interval ---------------------------------------------------------
 # The whole point of adding this: a bare "3/3" reads as proof of 100% reliability.
 # It isn't — these tests pin down how wide the interval actually is at small n, so

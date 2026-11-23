@@ -24,21 +24,27 @@ URL. That is what lets the same script hit a local server unchanged.
 
 | setting | purpose |
 |---|---|
-| `API_BASE_URL` | endpoint, overridable from `.env` |
-| `MODELS` | model ids to sweep |
+| `BACKEND` | env var; picks a profile in `PROFILES` — `groq` (default) or `ollama` |
+| `API_BASE_URL` | endpoint; defaults from the profile, overridable from `.env` |
+| `MODELS` | default model ids to sweep; defaults from the profile, `--models` overrides |
 | `RUNS_PER_CASE` | runs per (model, case); `--runs` overrides it per invocation |
-| `DELAY_BETWEEN_CALLS_SECONDS` | rate-limit spacing (see below) |
+| `REQUEST_TIMEOUT_SECONDS` | per-request timeout (from the profile) |
+| `DELAY_BETWEEN_CALLS_SECONDS` | rate-limit spacing (from the profile; see below) |
+| `MAX_RETRIES_ON_429` | rate-limit retries (from the profile) |
 | `MAX_CHAIN_STEPS` | turn budget for a `multi_call_chain` case |
+
+One `BACKEND` switch moves every profile value together — there are deliberately no
+per-setting env overrides, so a CPU server can't end up paced like Groq's free tier.
+
+| profile | base URL | key | timeout | delay | 429 retries | models |
+|---|---|---|---|---|---|---|
+| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | 60 s | 3.0 s | 3 | three Groq ids |
+| `ollama` | `http://localhost:11434/v1` | none (never sent) | 600 s | 0 s | 0 | `qwen3:4b` |
 
 ### Self-hosted endpoints
 
-Only `.env` changes:
-
-```bash
-API_BASE_URL=http://localhost:8080/v1     # llama.cpp server
-API_BASE_URL=http://localhost:11434/v1    # Ollama
-```
-
-Then set `MODELS` to the names your server serves. The API-key check is skipped
-automatically for `localhost`.
+Set `BACKEND=ollama` in `.env` (or the environment) and start the server with
+`OLLAMA_CONTEXT_LENGTH=16384`. The harness records the context window it observes on
+every result row. A `.env` that only sets `API_BASE_URL` to a local server keeps the
+`groq` profile's timeout and pacing and is stamped `backend=groq`, so set `BACKEND`.
 
