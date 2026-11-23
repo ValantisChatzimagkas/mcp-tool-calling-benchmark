@@ -10,6 +10,7 @@ import csv
 import json
 import math
 import re
+import shutil
 import sys
 import time
 from contextlib import contextmanager
@@ -18,7 +19,7 @@ from datetime import datetime, timezone
 import config
 from client import ApiError, chat, parse_tool_calls
 from mcp_client import McpServerError, McpServers, ServerSpec
-from sandbox import open_sandbox
+from sandbox import confine, ensure_installed, open_sandbox, runtime_prefix
 from scoring import score_chain, score_no_call, score_refusal, score_single_call
 
 
@@ -85,18 +86,44 @@ def substitute_paths(value, paths):
     return value
 
 
+def _launch(name, server, kind, install_dir, sandbox):
+    """Resolve one server's launch line and wrap it in the configured confinement."""
+    fill = {"{install}": str(install_dir or ""), "{path}": str(sandbox.paths[name])}
+
+    def resolve(text):
+        for key, value in fill.items():
+            text = text.replace(key, value)
+        return text
+
+    command = resolve(kind["command"])
+    args = [resolve(arg) for arg in kind["args"]]
+    readonly = []
+    if install_dir is not None:
+        if kind["runtime"] == "node":
+            command = shutil.which(command) or command
+        readonly = [install_dir, runtime_prefix(kind, install_dir)]
+    command, args = confine(command, args, sandbox.dirs[name], readonly)
+    return ServerSpec(name, command, args, server.get("tools"))
+
+
 @contextmanager
 def open_mcp_case(case):
     """Start a case's servers in a fresh sandbox. Yields (tools, execute, paths)."""
     kinds = config.MCP_SERVER_KINDS
     servers = case["mcp_servers"]
+    for name, server in servers.items():
+        if server["kind"] not in kinds:
+            raise McpServerError(f"server {name!r}: unknown kind {server['kind']!r}")
+    # Installs happen first, outside any sandbox, so a failure never leaves one behind.
+    installs = {
+        kind: ensure_installed(kind, kinds[kind]) for kind in {s["kind"] for s in servers.values()}
+    }
+
     with open_sandbox(servers, kinds, config.FIXTURES_DIR) as sandbox:
-        specs = []
-        for name, server in servers.items():
-            kind = kinds[server["kind"]]
-            path = str(sandbox.paths[name])
-            args = [arg.replace("{path}", path) for arg in kind["args"]]
-            specs.append(ServerSpec(name, kind["command"], args, server.get("tools")))
+        specs = [
+            _launch(name, server, kinds[server["kind"]], installs[server["kind"]], sandbox)
+            for name, server in servers.items()
+        ]
         with McpServers(specs) as running:
             yield running.tools, running.call, sandbox.paths
 

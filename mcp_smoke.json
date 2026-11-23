@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "id": "selection_mcp_read_seeded_file",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Read the file ${docs}/readme.md and tell me what it says.",
+      "mcp_servers": {
+        "docs": {
+          "kind": "filesystem",
+          "fixture": "docs",
+          "tools": ["read_text_file", "list_directory"]
+        }
+      },
+      "expected_tool_call": {
+        "name": "docs__read_text_file",
+        "args": {"path": "${docs}/readme.md"}
+      }
+    },
+    {
+      "id": "selection_mcp_collision_two_roots",
+      "type": "single_call",
+      "category": "selection",
+      "prompt": "Read the file ${notes}/todo.txt and tell me what it says.",
+      "mcp_servers": {
+        "docs": {
+          "kind": "filesystem",
+          "fixture": "docs",
+          "tools": ["read_text_file", "list_directory"]
+        },
+        "notes": {
+          "kind": "filesystem",
+          "fixture": "notes",
+          "tools": ["read_text_file", "list_directory"]
+        }
+      },
+      "expected_tool_call": {
+        "name": "notes__read_text_file",
+        "args": {"path": "${notes}/todo.txt"}
+      }
+    },
+    {
+      "id": "chaining_mcp_query_then_write",
+      "type": "multi_call_chain",
+      "category": "chaining",
+      "prompt": "Look up Ada Lovelace's email address in the people table of the database, then save only the address, nothing else, to ${notes}/ada_email.txt.",
+      "mcp_servers": {
+        "db": {
+          "kind": "sqlite",
+          "fixture": "crm.sql",
+          "tools": ["read_query", "list_tables"]
+        },
+        "notes": {
+          "kind": "filesystem",
+          "fixture": "notes",
+          "tools": ["write_file", "read_text_file"]
+        }
+      },
+      "expected_tool_call": {
+        "sequence": [
+          {"name": "db__read_query", "args": {"query": "SELECT email FROM people"}, "loose_args": ["query"]},
+          {
+            "name": "notes__write_file",
+            "args": {"path": "${notes}/ada_email.txt", "content": "ada@example.com"}
+          }
+        ]
+      }
+    }
+  ]
+}

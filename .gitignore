@@ -10,6 +10,9 @@ __pycache__/
 *.py[cod]
 .venv/
 
+# Pinned MCP servers for server-backed cases, installed on first use
+/.mcp-servers/
+
 # Tooling caches
 .pytest_cache/
 .ruff_cache/
