@@ -52,7 +52,7 @@ def hang() -> str:
 @server.tool()
 def spawn_child() -> str:
     """Start a long-lived grandchild process and return its pid."""
-    child = subprocess.Popen(["sleep", "300"])
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(300)"])
     return str(child.pid)
 
 
