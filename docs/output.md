@@ -45,6 +45,13 @@ Two files are written at the end (both gitignored — they are regenerated every
   it) and `context_length` is the context window the server actually loaded the model
   with, observed rather than configured (empty when unknown). The two counts are plain
   integers; `notes` holds the deduped notes from the failing runs.
+  `status` is `ok` for a model that was run, or `unsupported` for one whose chat
+  template has no tool support (the server's `/api/show` doesn't list `tools` among its
+  capabilities). An `unsupported` row has `runs_total=0` and `runs_passed=0`, and the
+  model is never sent a request — it is reported as untestable, not as `0/n`. Because
+  its `runs_total` is zero, such a row sits outside every category and overall rollup,
+  and `results.md` shows `unsupported` in its place. (Only Ollama reports capabilities;
+  Groq models are always treated as supported.)
 - `results.md` — run metadata, a pass-rate table broken down by category, the full
   result matrix grouped by category (`passed/total` per cell), and every failure note
 

@@ -130,6 +130,40 @@ def write_csv(rows, path):
         writer.writerows(rows)
 
 
+UNSUPPORTED_NOTE = "chat template has no tool support"
+
+
+def unsupported_rows(model, info, cases, run_timestamp=""):
+    """One row per case for a model that can't be tested: zero runs, not zero passes.
+
+    A model whose chat template has no tool support never reached the scorer, so
+    `0/3` would blame its tool-calling for something the server refused up front.
+    `runs_total=0` keeps these rows out of every rollup by construction.
+    """
+    return [
+        {
+            "model": model,
+            "backend": config.BACKEND,
+            "endpoint": config.API_BASE_URL,
+            "quantization": info.quantization,
+            "context_length": "",
+            "run_timestamp": run_timestamp,
+            "case_id": case["id"],
+            "category": case["category"],
+            "case_type": case["type"],
+            "status": "unsupported",
+            "runs_passed": 0,
+            "runs_total": 0,
+            "notes": UNSUPPORTED_NOTE,
+        }
+        for case in cases
+    ]
+
+
+def _is_unsupported(model_rows):
+    return bool(model_rows) and all(r["status"] == "unsupported" for r in model_rows)
+
+
 def _tally(rows):
     """(passed runs, total runs) for a group of result rows — runs, not cases."""
     return sum(r["runs_passed"] for r in rows), sum(r["runs_total"] for r in rows)
@@ -194,6 +228,7 @@ def write_markdown(rows, models, cases, runs, run_started, path):
     """
     categories = list(dict.fromkeys(c["category"] for c in cases))
     lookup = {(r["model"], r["case_id"]): r for r in rows}
+    unsupported = {m for m in models if _is_unsupported([r for r in rows if r["model"] == m])}
     lines = []
 
     lines += [
@@ -203,7 +238,8 @@ def write_markdown(rows, models, cases, runs, run_started, path):
         f"- **Backend:** `{config.BACKEND}`",
         f"- **Endpoint:** `{config.API_BASE_URL}`",
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
-        f"- **Models:** {len(models)}",
+        f"- **Models:** {len(models)}"
+        + (f" ({len(unsupported)} unsupported)" if unsupported else ""),
         f"- **Runs per case:** {runs}",
         "- **Confidence:** 95% Wilson score intervals in parentheses. At "
         f"{runs} run(s) per case these are wide by nature — a clean k/n is not "
@@ -229,9 +265,14 @@ def write_markdown(rows, models, cases, runs, run_started, path):
     ]
     for model in models:
         model_rows = [r for r in rows if r["model"] == model]
-        cells = [_fraction(*_tally(model_rows))]
-        for category in categories:
-            cells.append(_fraction(*_tally([r for r in model_rows if r["category"] == category])))
+        if model in unsupported:
+            cells = ["unsupported"] * (len(categories) + 1)
+        else:
+            cells = [_fraction(*_tally(model_rows))]
+            for category in categories:
+                cells.append(
+                    _fraction(*_tally([r for r in model_rows if r["category"] == category]))
+                )
         lines.append(f"| `{model}` | " + " | ".join(cells) + " |")
 
     lines += ["", "## Results", ""]
@@ -241,8 +282,13 @@ def write_markdown(rows, models, cases, runs, run_started, path):
             lines += [CATEGORY_NOTES[category], ""]
 
         cat_rows = [r for r in rows if r["category"] == category]
-        per_model = {m: _tally([r for r in cat_rows if r["model"] == m]) for m in models}
-        saturated = all(p == t and t > 0 for p, t in per_model.values())
+        per_model = {
+            m: _tally([r for r in cat_rows if r["model"] == m])
+            for m in models
+            if m not in unsupported
+        }
+        # Unsupported models were never tested, so they neither block nor earn saturation.
+        saturated = bool(per_model) and all(p == t and t > 0 for p, t in per_model.values())
         if saturated:
             total_runs = next(iter(per_model.values()))[1]
             lines += [
@@ -259,7 +305,12 @@ def write_markdown(rows, models, cases, runs, run_started, path):
             cells = []
             for model in models:
                 row = lookup.get((model, case["id"]))
-                cells.append("—" if row is None else _cell(row["runs_passed"], row["runs_total"]))
+                if row is None:
+                    cells.append("—")
+                elif row["status"] == "unsupported":
+                    cells.append("unsupported")
+                else:
+                    cells.append(_cell(row["runs_passed"], row["runs_total"]))
             lines.append(f"| {case['id']} | {case['type']} | " + " | ".join(cells) + " |")
         lines.append("")
 
@@ -328,6 +379,13 @@ def main(argv=None):
     run_started = datetime.now(timezone.utc)
 
     for model in models:
+        if not infos[model].supports_tools:
+            print(f"\n=== {model}: unsupported ({UNSUPPORTED_NOTE}) — skipped ===")
+            rows += unsupported_rows(
+                model, infos[model], cases, run_started.isoformat(timespec="seconds")
+            )
+            continue
+
         print(f"\n=== {model} ({runs} run(s) per case) ===")
         for case in cases:
             passed, total, notes = run_case_repeated(model, case, tool_registry, runs)

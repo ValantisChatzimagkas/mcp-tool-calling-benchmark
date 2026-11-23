@@ -140,3 +140,47 @@ def test_key_check_names_ollama_backend_for_local_servers(monkeypatch):
         main(["--runs", "1"])
 
     assert "GROQ_API_KEY" in str(exc.value) and "BACKEND=ollama" in str(exc.value)
+
+
+# --- unsupported models ------------------------------------------------------
+
+NO_TOOLS = {"details": {"quantization_level": "Q4_0"}, "capabilities": ["completion"]}
+TWO_RESTRAINT = ["restraint_general_question", "restraint_explicit_negation"]
+
+
+def test_model_without_tools_capability_is_unsupported_not_zero_over_n(fake_ollama):
+    fake_ollama.show["notools"] = NO_TOOLS
+
+    main(["--models", "notools", "m4b", "--cases", *TWO_RESTRAINT, "--runs", "2"])
+
+    rows = [r for r in read_rows(fake_ollama) if r["model"] == "notools"]
+    assert len(rows) == 2
+    assert {(r["status"], r["runs_total"], r["runs_passed"]) for r in rows} == {
+        ("unsupported", "0", "0")
+    }
+    assert {r["quantization"] for r in rows} == {"Q4_0"}
+    sent_to = {r["body"]["model"] for r in fake_ollama.chat_requests}
+    assert sent_to == {"m4b"}
+
+    report = (fake_ollama.tmp_path / "results.md").read_text()
+    assert "| `notools` | unsupported | unsupported |" in report  # pass-rate table
+    matrix = [line for line in report.splitlines() if line.startswith("| restraint_")]
+    assert len(matrix) == 2 and all("| unsupported |" in line for line in matrix)
+    assert "0/0" not in report and "**0/" not in report
+
+
+def test_unsupported_model_does_not_break_saturation_flag(fake_ollama):
+    fake_ollama.show["notools"] = NO_TOOLS
+
+    main(["--models", "notools", "m4b", "--cases", *TWO_RESTRAINT, "--runs", "1"])
+    assert "saturated" in (fake_ollama.tmp_path / "results.md").read_text()
+
+
+def test_only_unsupported_models_flag_nothing_saturated(fake_ollama):
+    fake_ollama.show["notools"] = NO_TOOLS
+
+    main(["--models", "notools", "--cases", *TWO_RESTRAINT, "--runs", "1"])
+    report = (fake_ollama.tmp_path / "results.md").read_text()
+    assert "saturated" not in report
+    assert "(1 unsupported)" in report
+    assert "None." in report  # no failure notes: unsupported is not a failure
