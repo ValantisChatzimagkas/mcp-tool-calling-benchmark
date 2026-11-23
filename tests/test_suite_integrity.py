@@ -16,7 +16,20 @@ import pytest
 import config
 from run_eval import CSV_COLUMNS, _cell, _fraction, _tally, wilson_interval
 
-CATEGORIES = {"selection", "arguments", "chaining", "restraint", "refusal"}
+CATEGORIES = {
+    "selection",
+    "arguments",
+    "chaining",
+    "restraint",
+    "refusal",
+    "server_chaining",
+    "registry",
+    "collision",
+}
+
+
+# Strict xfail: these fail until the SOL-103 cases land, and an early pass is an error.
+NEW_CATEGORY_XFAIL = pytest.mark.xfail(strict=True, reason="SOL-103 phase 3 adds the cases")
 
 
 def test_case_ids_are_unique(suite):
@@ -94,6 +107,7 @@ def test_every_should_refuse_case_declares_what_is_missing(suite):
         assert spec.get("must_mention"), f"{case['id']}: expected_refusal names nothing"
 
 
+@NEW_CATEGORY_XFAIL
 def test_every_category_has_at_least_one_case(main_suite):
     """A category that exists only in docs is a gap in the suite, not a category."""
     present = {case["category"] for case in main_suite["cases"]}
@@ -191,6 +205,112 @@ def test_placeholders_name_declared_servers(suite):
             for text in _strings(case.get(key, "")):
                 for name in PLACEHOLDER.findall(text):
                     assert name in servers, f"{case['id']}: ${{{name}}} is not a declared server"
+
+
+# --- new-category shapes (SOL-103) -------------------------------------------
+# Each shape test first asserts its category is non-empty, so it can't pass vacuously on
+# a suite that never gained the cases.
+
+
+def _category_cases(main_suite, category):
+    cases = [c for c in main_suite["cases"] if c["category"] == category]
+    assert cases, f"no {category!r} cases in cases.json"
+    return cases
+
+
+def _steps(case):
+    """Every expectation in a server-backed case: each chain step, or the single call."""
+    expected = case["expected_tool_call"]
+    if "sequence" in expected:
+        return [s for s in expected["sequence"] if isinstance(s, dict)]
+    return [expected]
+
+
+@NEW_CATEGORY_XFAIL
+def test_registry_cases_expose_every_tool(main_suite):
+    """A registry case's point is a large tool list: no allow-list, several server kinds."""
+    for case in _category_cases(main_suite, "registry"):
+        servers = case["mcp_servers"]
+        assert case["type"] == "single_call", f"{case['id']}: registry cases are single_call"
+        assert len({s["kind"] for s in servers.values()}) >= 2, (
+            f"{case['id']}: needs servers of at least 2 distinct kinds"
+        )
+        filtered = [name for name, s in servers.items() if "tools" in s]
+        assert not filtered, f"{case['id']}: allow-list on {filtered} shrinks the registry"
+
+
+@NEW_CATEGORY_XFAIL
+def test_collision_cases_have_exactly_one_correct_server(main_suite):
+    """Two servers expose the expected tool name; only the expected one has the answer."""
+    root = Path(config.FIXTURES_DIR)
+    for case in _category_cases(main_suite, "collision"):
+        cid, servers = case["id"], case["mcp_servers"]
+        assert case["type"] == "single_call", f"{cid}: collision cases are single_call"
+        assert all("tools" in s for s in servers.values()), (
+            f"{cid}: every server needs an allow-list"
+        )
+
+        expected = case["expected_tool_call"]
+        expected_server, bare = expected["name"].split("__", 1)
+        sharing = [n for n, s in servers.items() if bare in s["tools"]]
+        assert len(sharing) >= 2, f"{cid}: {bare!r} is in the allow-list of only {sharing}"
+
+        by_kind = {}
+        for name in sharing:
+            by_kind.setdefault(servers[name]["kind"], []).append(name)
+        assert any(len(group) >= 2 for group in by_kind.values()), (
+            f"{cid}: no two servers of one kind expose {bare!r}"
+        )
+        for group in by_kind.values():
+            fixtures = [servers[n]["fixture"] for n in group]
+            assert len(fixtures) == len(set(fixtures)), f"{cid}: servers share a fixture {fixtures}"
+
+        match = re.match(r"^\$\{(\w+)\}/(.+)$", expected.get("args", {}).get("path", ""))
+        if match:
+            rel = match.group(2)
+            own = root / servers[expected_server]["fixture"] / rel
+            assert own.is_file(), f"{cid}: expected file {own} does not exist"
+            for name in sharing:
+                other = root / servers[name]["fixture"] / rel
+                if name != expected_server and other.is_file():
+                    assert own.read_bytes() != other.read_bytes(), (
+                        f"{cid}: {name} holds identical bytes, so either server is correct"
+                    )
+
+
+@NEW_CATEGORY_XFAIL
+def test_server_chaining_cases_use_real_output(main_suite):
+    """The last step's `content` must be pinned (in `args`, not loose): the model can only
+    know it by reading the real output of an earlier step."""
+    for case in _category_cases(main_suite, "server_chaining"):
+        cid = case["id"]
+        assert case["type"] == "multi_call_chain", f"{cid}: server_chaining is multi_call_chain"
+        servers = case["mcp_servers"]
+        assert len({s["kind"] for s in servers.values()}) >= 2, f"{cid}: needs 2+ server kinds"
+        assert "tool_results" not in case, f"{cid}: results come from the real servers"
+        last = case["expected_tool_call"]["sequence"][-1]
+        assert isinstance(last, dict) and "content" in last.get("args", {}), (
+            f"{cid}: last step must pin `content` in args"
+        )
+        assert "content" not in last.get("loose_args", []), f"{cid}: `content` must not be loose"
+
+
+def test_loose_args_are_listed_in_args(suite):
+    """A `loose_args` key with no matching `args` key checks nothing (scoring.py skips it),
+    so the expectation would pass for any value."""
+    for case in suite["cases"]:
+        if not case.get("expected_tool_call"):
+            continue
+        for step in _steps(case):
+            missing = set(step.get("loose_args", [])) - set(step.get("args", {}))
+            assert not missing, f"{case['id']}: loose_args {sorted(missing)} not in args"
+
+
+@NEW_CATEGORY_XFAIL
+def test_suite_size_within_sweep_budget(main_suite):
+    """SOL-105's overnight sweep has to fit one run: keep the suite within 15-20 cases."""
+    size = len(main_suite["cases"])
+    assert 15 <= size <= 20, f"{size} cases; the overnight-sweep budget is 15-20"
 
 
 # --- the results rollup -----------------------------------------------------
