@@ -14,6 +14,15 @@ class ApiError(Exception):
     """Any failure talking to the endpoint. Scored as a failed case, never fatal."""
 
 
+class ServerUnreachable(ApiError):
+    """The connection itself failed (refused, reset, dropped): the server is down.
+
+    Unlike an HTTP error or a read timeout, this says nothing about the model — a
+    crashed or OOM-killed server would otherwise turn every remaining run into a recorded
+    model failure in seconds. The sweep stops instead, and --resume picks it up again.
+    """
+
+
 class ModelInfo(NamedTuple):
     """What the server says about a model that the model tag alone doesn't."""
 
@@ -57,6 +66,8 @@ def chat(model, messages, tools):
                 json=payload,
                 timeout=config.REQUEST_TIMEOUT_SECONDS,
             )
+        except requests.ConnectionError as exc:  # includes ConnectTimeout
+            raise ServerUnreachable(f"{type(exc).__name__}: {exc}") from exc
         except requests.RequestException as exc:
             raise ApiError(f"request failed: {type(exc).__name__}: {exc}") from exc
 

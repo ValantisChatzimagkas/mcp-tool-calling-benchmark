@@ -9,6 +9,7 @@ config.py     endpoint, key, model list, tuning — the only place these live
 client.py     HTTP and response parsing — the only module that touches the network
 scoring.py    pure pass/fail logic — no I/O, no config, fully unit-tested
 run_eval.py   loads the suite, runs cases, writes results, CLI
+journal.py    per-run append-only journal behind --resume — file I/O only, no network
 cases.json    the benchmark suite (data, not code)
 tests/        pytest — scoring logic, plus checks on cases.json itself
 ```

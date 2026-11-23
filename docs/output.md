@@ -31,7 +31,8 @@ Progress prints live as it runs, with the per-case run count in the left column:
   [1/3] chaining_three_steps      get_document: wrong value for document_id: 'doc_id_from_search_results' != 'doc_114'
 ```
 
-Two files are written at the end (both gitignored — they are regenerated every run):
+Two files are written at the end (both gitignored — they are regenerated every run),
+built from the run journal described below:
 
 - `results.csv` — one row per (model, case):
   `model, backend, endpoint, quantization, context_length, run_timestamp, case_id,
@@ -62,3 +63,31 @@ The per-category breakdown is the point: one aggregate number tells you a model 
 14/17, which is not actionable. The breakdown tells you it went 5/5 on selection and
 1/3 on refusal, which is.
 
+## Interrupted sweeps and `--resume`
+
+A sweep against a CPU-hosted model can run for hours, so every finished run is appended
+to `results.journal.jsonl` (gitignored) as it completes: one JSON line carrying the
+backend, endpoint, model, quantization, case id, a hash of the case and its tool
+schemas, the run index, pass/fail, the note and the observed context length. `results.csv`
+and `results.md` are rebuilt from the journal at the end, so a resumed sweep and an
+uninterrupted one produce the same rows (except `run_timestamp`, which is the earliest
+run in each row, since a resumed sweep spans sessions).
+
+- **Interrupt** (Ctrl-C, or the server dropping the connection): the runs already
+  recorded are kept. Rerun the same command with `--resume` and only the missing
+  (model, case, run) rows execute.
+- **Without `--resume`**, a non-empty live journal makes the run stop immediately
+  rather than fold old runs into what was meant to be a fresh sweep.
+- **A record is reused only if its whole key matches**: backend, endpoint, model,
+  quantization, case id, case hash and run index. Edit a case's prompt or tools, switch
+  quantization, or point at another host, and those runs execute again. A different
+  `--runs` just ignores journaled runs beyond the new count.
+- **Server unreachable.** If the connection itself fails (refused, reset — a crashed or
+  OOM-killed server), the sweep stops with `server unreachable (...); rerun with
+  --resume` and that run is *not* journaled. Read timeouts and HTTP errors are still
+  recorded as failed runs, as before. This applies to every backend: a network outage
+  now aborts a sweep (resumably) instead of scoring `0/n`.
+- **Finished sweeps archive their journal** to `results.journal.<UTC timestamp>.jsonl`
+  once both result files are written, so the next plain `uv run run_eval.py` starts
+  fresh. Archives accumulate until you delete them by hand. A crash while writing the
+  results leaves the live journal in place for `--resume`.

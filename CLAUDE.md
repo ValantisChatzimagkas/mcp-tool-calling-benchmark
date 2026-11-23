@@ -13,7 +13,8 @@ this way; don't let it license a protocol-level claim.
 Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` or pip.
 
 - Run: `uv run run_eval.py` (`--models <id>` / `--cases <case_id>` to narrow, `--runs <n>`
-  to override `RUNS_PER_CASE`)
+  to override `RUNS_PER_CASE`, `--resume` to continue an interrupted sweep from its
+  journal)
 - Test: `uv run pytest` (offline, no API calls)
 - Lint: `uv run ruff check .` and `uv run ruff format .`
 - Deps: `uv add <pkg>` / `uv add --dev <pkg>`, then commit `uv.lock`
@@ -26,6 +27,7 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 | `client.py` | HTTP and response parsing — the only module that touches the network |
 | `scoring.py` | pure pass/fail logic — no I/O, no config |
 | `run_eval.py` | loads the suite, runs cases, writes results, CLI |
+| `journal.py` | per-run append-only journal behind `--resume` — file I/O only, no network, no config |
 | `cases.json` | the benchmark suite (data, not code) |
 
 ## Vocabulary

@@ -116,7 +116,9 @@ class FakeOllama:
 
         self._server = ThreadingHTTPServer(("127.0.0.1", self.port), Handler)
         self.port = self._server.server_address[1]
-        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True
+        )
         self._thread.start()
 
     def stop(self):
