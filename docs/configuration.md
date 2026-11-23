@@ -10,6 +10,7 @@ client.py     HTTP and response parsing — the only module that touches the net
 scoring.py    pure pass/fail logic — no I/O, no config, fully unit-tested
 run_eval.py   loads the suite, runs cases, writes results, CLI
 journal.py    per-run append-only journal behind --resume — file I/O only, no network
+throughput.py prompt and generation tok/s from Ollama's native timings (BACKEND=ollama)
 cases.json    the benchmark suite (data, not code)
 tests/        pytest — scoring logic, plus checks on cases.json itself
 ```

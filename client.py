@@ -92,6 +92,54 @@ def chat(model, messages, tools):
     raise ApiError("rate limited, retries exhausted")
 
 
+class GenerationStats(NamedTuple):
+    """One call's token counts and wall-clock seconds, as the server itself measured."""
+
+    prompt_tokens: int
+    prompt_seconds: float
+    generated_tokens: int
+    generation_seconds: float
+
+
+def chat_stats(model, messages, tools, num_predict) -> GenerationStats:
+    """One native /api/chat call, for throughput: prompt and generation token timings.
+
+    The OpenAI-compatible /v1 endpoint carries no timings, so this is the one place the
+    harness talks to Ollama's native chat API. Durations come back in nanoseconds.
+    """
+    if config.NATIVE_API is None:
+        raise ApiError("throughput needs a backend with a native API (BACKEND=ollama)")
+
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": config.TEMPERATURE, "num_predict": num_predict},
+    }
+    if tools:
+        payload["tools"] = tools
+
+    try:
+        response = requests.post(
+            f"{config.API_ROOT}/api/chat", json=payload, timeout=config.REQUEST_TIMEOUT_SECONDS
+        )
+    except requests.RequestException as exc:
+        raise ApiError(f"request failed: {type(exc).__name__}: {exc}") from exc
+    if response.status_code != 200:
+        raise ApiError(f"HTTP {response.status_code}: {response.text[:200]}")
+
+    body = response.json()
+    try:
+        return GenerationStats(
+            prompt_tokens=body["prompt_eval_count"],
+            prompt_seconds=body["prompt_eval_duration"] / 1e9,
+            generated_tokens=body["eval_count"],
+            generation_seconds=body["eval_duration"] / 1e9,
+        )
+    except KeyError as exc:
+        raise ApiError(f"response lacks timing field {exc}: {json.dumps(body)[:200]}") from exc
+
+
 def describe_model(model) -> ModelInfo:
     """Quantization and tool support, as the server reports them.
 

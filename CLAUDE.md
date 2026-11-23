@@ -28,6 +28,7 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 | `scoring.py` | pure pass/fail logic — no I/O, no config |
 | `run_eval.py` | loads the suite, runs cases, writes results, CLI |
 | `journal.py` | per-run append-only journal behind `--resume` — file I/O only, no network, no config |
+| `throughput.py` | measures prompt/generation tok/s from Ollama's native `/api/chat` timings (`BACKEND=ollama` only) |
 | `cases.json` | the benchmark suite (data, not code) |
 
 ## Vocabulary
