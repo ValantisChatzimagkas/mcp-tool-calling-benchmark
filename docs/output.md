@@ -41,7 +41,8 @@ Two files are written at the end (both gitignored — they are regenerated every
   the difference in conditions is in the data, not just in a header you might not have
   kept. The two counts are plain integers; `notes` holds the deduped notes from the
   failing runs.
-- `results.md` — run metadata, a pass-rate table broken down by category, the full
+- `results.md` — run metadata (including the suite file it was produced from, so a
+  `--suite` run can't be mistaken for the main sweep), a pass-rate table broken down by category, the full
   result matrix grouped by category (`passed/total` per cell), and every failure note
 
 Every rate — per category and overall — is passed runs over total runs, so a case that

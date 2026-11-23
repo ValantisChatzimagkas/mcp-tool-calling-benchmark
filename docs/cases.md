@@ -61,6 +61,8 @@ Optional per-case keys:
   a `due_date` nobody gave it.
 - `tool_results` — `multi_call_chain` only: canned JSON fed back per tool name, so the
   model has something to act on for the next step.
+- `mcp_servers` — instead of `available_tools` (a case has exactly one; see
+  [Server-backed cases](#server-backed-cases)).
 - `expected_refusal` — `should_refuse` only, and required for it:
 
 ```json
@@ -121,11 +123,45 @@ needs an actual stateful backend to check a final state against, which is the la
 scoring tweak.
 
 
+## Server-backed cases
+
+A case may declare real stdio MCP servers instead of hand-written tools. These live in
+`mcp_smoke.json` (run with `--suite mcp_smoke.json`), whose top level has no `tools`
+registry:
+
+```json
+"mcp_servers": {
+  "notes": {"kind": "filesystem", "fixture": "notes", "tools": ["read_text_file", "write_file"]}
+}
+```
+
+- The key (`notes`) is the server name and tool prefix: the model sees the server's
+  real `tools/list` schemas, unmodified, as `notes__read_text_file` etc., so two servers
+  of the same kind don't collide. Expected tool names carry the prefix.
+- `kind` names an entry in `config.MCP_SERVER_KINDS` (pinned `filesystem` and `sqlite`
+  today). `fixture` is a path under `fixtures/`: a directory for `filesystem`, a `.sql`
+  script for `sqlite`. Each run copies/executes it into a fresh temp sandbox, so runs
+  can't see each other's writes and fixtures are never mutated.
+- `tools` (optional) is an allow-list of the server's tool names; absent means all. A
+  name the server doesn't offer fails the run rather than silently shrinking the set.
+  Use it to keep the schema payload small (Groq's tokens-per-minute limit).
+- `${server}` in `prompt`, `expected_tool_call` and `expected_refusal` is replaced by
+  that server's sandbox path (the directory for `filesystem`, the database file for
+  `sqlite`) before scoring. An unknown name fails the run.
+- `available_tools` and `mcp_servers` are mutually exclusive, and a server-backed case
+  has no `tool_results` — the real servers produce them. Scoring is unchanged.
+- A server that can't start, crashes, hangs or can't be confined fails that run with a
+  note starting `mcp server error:`; the sweep continues. Infrastructure failures and
+  model failures are only distinguishable by that prefix.
+
 ## Adding to the suite
 
 - **New case** — add an object to `cases`, in its category's block, named
   `<category>_<specific>`. If it needs a new tool, add the schema to `tools` first. No
   Python changes. `uv run pytest` will tell you if the id, category, or grouping is off.
+- **New server-backed case** — add it to `mcp_smoke.json` (or a new suite file) with
+  `mcp_servers`, using an existing `kind`; add seed data under `fixtures/` if needed. A
+  new kind of server needs an entry in `config.MCP_SERVER_KINDS` with a pinned version.
 - **New category** — add it to `CATEGORIES` in `tests/test_suite_integrity.py` and give
   it at least one case. Reporting picks it up automatically from the data.
 - **New model** — append to `MODELS` in `config.py`, or pass `--models` at runtime.

@@ -4,7 +4,11 @@ Back to the [README](../README.md).
 
 
 See **Scope** in the README for the three big ones (no MCP protocol, no self-hosted run,
-not a certification). The rest, specific to the current 21-case suite:
+not a certification). They still hold for the 21-case sweep. The server-backed cases in
+`mcp_smoke.json` cover stdio `tools/list` / `tools/call` against two pinned reference
+servers (filesystem, sqlite) and nothing else of the protocol (no HTTP/SSE, resources,
+prompts or auth), and there are only 3 of them. The rest, specific to the current
+21-case suite:
 
 - Refusal content is checked by substring keywords, not meaning. A model could satisfy
   `must_mention` while asking something unhelpful, and an unusual-but-correct phrasing

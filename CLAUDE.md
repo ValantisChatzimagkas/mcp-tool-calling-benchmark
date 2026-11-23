@@ -4,8 +4,11 @@ Scores models on MCP-style tool calling via any OpenAI-compatible
 `/chat/completions` endpoint (Groq now, self-hosted later).
 
 **Scope:** Tests OpenAI-format function-calling reliability for tools shaped like MCP
-tools. Does not exercise the MCP protocol — no JSON-RPC, no `tools/list` / `tools/call`,
-no running MCP server. The name is kept for the connection to why the tools are shaped
+tools. The 21 cases in `cases.json` use hand-written schemas and canned results and do
+not exercise the MCP protocol. Server-backed cases (`mcp_servers`, in `mcp_smoke.json`)
+exercise stdio `tools/list` and `tools/call` against pinned reference servers; HTTP/SSE,
+resources, prompts, auth and the rest of the protocol are not exercised, and no claim
+beyond that is licensed. The name is kept for the connection to why the tools are shaped
 this way; don't let it license a protocol-level claim.
 
 ## Commands
@@ -14,7 +17,11 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 
 - Run: `uv run run_eval.py` (`--models <id>` / `--cases <case_id>` to narrow, `--runs <n>`
   to override `RUNS_PER_CASE`)
-- Test: `uv run pytest` (offline, no API calls)
+- Suite: `--suite <file>` runs another suite file, e.g. `uv run run_eval.py --suite
+  mcp_smoke.json --runs 1` (server-backed cases; needs `node`/`npm`, `uv`, `bwrap`, and
+  network for the one-time server install into `.mcp-servers/`)
+- Test: `uv run pytest` (offline, no API calls, installs nothing); `uv run pytest -m live`
+  runs the real-server and confinement tests (needs the server prerequisites above)
 - Lint: `uv run ruff check .` and `uv run ruff format .`
 - Deps: `uv add <pkg>` / `uv add --dev <pkg>`, then commit `uv.lock`
 
@@ -25,8 +32,12 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 | `config.py` | endpoint, key, model list, tuning — the only place these live |
 | `client.py` | HTTP and response parsing — the only module that touches the network |
 | `scoring.py` | pure pass/fail logic — no I/O, no config |
+| `mcp_client.py` | spawns local stdio MCP servers and speaks `tools/list` / `tools/call`; opens no sockets itself |
+| `sandbox.py` | per-run temp sandboxes, pinned server installs, bwrap argv |
 | `run_eval.py` | loads the suite, runs cases, writes results, CLI |
 | `cases.json` | the benchmark suite (data, not code) |
+| `mcp_smoke.json` | 3 server-backed cases that prove the live-server path |
+| `fixtures/` | seed data copied into each run's sandbox |
 
 ## Vocabulary
 
