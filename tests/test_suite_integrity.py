@@ -304,6 +304,14 @@ def test_suite_size_within_sweep_budget(main_suite):
     assert 15 <= size <= 20, f"{size} cases; the overnight-sweep budget is 15-20"
 
 
+def test_docs_case_count_matches_cases_json(main_suite):
+    """README's "`cases.json`, N cases" must track the suite — prose counts drift silently."""
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    match = re.search(r"`cases\.json`,\s+(\d+)\s+cases", readme)
+    assert match, "README no longer says '`cases.json`, N cases'; update this test with it"
+    assert int(match.group(1)) == len(main_suite["cases"])
+
+
 # --- the results rollup -----------------------------------------------------
 # Not about cases.json, but the same failure mode: a rollup that quietly counts the
 # wrong thing still prints a plausible-looking table.

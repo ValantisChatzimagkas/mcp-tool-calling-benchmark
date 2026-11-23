@@ -11,8 +11,8 @@ scoring.py    pure pass/fail logic — no I/O, no config, fully unit-tested
 mcp_client.py spawns local stdio MCP servers; tools/list, tools/call (opens no sockets)
 sandbox.py    per-run temp sandboxes, pinned server installs, bwrap confinement argv
 run_eval.py   loads the suite, runs cases, writes results, CLI
-cases.json    the benchmark suite (data, not code)
-mcp_smoke.json server-backed smoke cases, run with --suite
+cases.json    the benchmark suite (data, not code): 14 canned + 6 server-backed cases
+mcp_smoke.json 3 server-backed smoke cases, run with --suite
 fixtures/     seed data copied into each run's sandbox
 .mcp-servers/ pinned server installs (gitignored, created on first use)
 tests/        pytest — scoring logic, suite integrity, MCP facade; `-m live` for real servers

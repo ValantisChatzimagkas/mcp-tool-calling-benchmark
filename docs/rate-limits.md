@@ -6,8 +6,10 @@ Back to the [README](../README.md).
 Checked directly against Groq's response headers rather than assumed: the binding
 constraint is not a flat requests-per-minute number. For `qwen/qwen3.6-27b` on this
 key, `x-ratelimit-limit-tokens` is 8000/minute and `x-ratelimit-limit-requests` is
-1000/day. Every case sends the full tool schema (4–7 function definitions) plus the
-response, so token spend per call is what exhausts the budget — `qwen` is the model
+1000/day. Every case sends its full tool schema plus the response — 2–4 hand-written
+function definitions for a canned case, up to 22 real server-supplied ones (~16,000
+characters, ~4k tokens) for a `registry` case — so token spend per call is what
+exhausts the budget — `qwen` is the model
 that visibly hits 429s in every sweep; `gpt-oss-20b` and `llama-3.3-70b-versatile`
 never have, on the same schedule. Pacing by request count (`DELAY_BETWEEN_CALLS_SECONDS`)
 does not fully prevent this, because the limit isn't request count.
@@ -18,8 +20,11 @@ the throttling. Expect qwen specifically to spend real wall-clock time sitting i
 retries — that's most of why a full sweep takes longer than the raw call count implies.
 Set the delay to `0` for a local server, where this doesn't apply.
 
-Repeats multiply the call count, not the pacing logic: 21 cases × 3 models × 3 runs is
-roughly 190 base calls (more once chaining cases' internal turns are counted). Use
+Repeats multiply the call count, not the pacing logic: 20 cases × 3 models × 3 runs is
+roughly 180 base calls (more once chaining cases' internal turns are counted: each
+step of a chain is another request). A `registry` case costs one ~4k-token request per
+run, so it takes half of qwen's 8000-token minute by itself; a chained registry case
+(2–3 requests of that size) would exhaust the retries, which is why none exists. Use
 `--runs 1` with `--cases` for a quick check.
 
 A failed API call is scored as a fail with the error in the notes column — it never
