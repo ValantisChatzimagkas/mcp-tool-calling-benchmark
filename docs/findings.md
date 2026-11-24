@@ -3,6 +3,11 @@
 Back to the [README](../README.md).
 
 
+These findings describe the pre-SOL-103 suite (21 canned cases); no number below was
+re-measured on the current 20-case suite, which replaced the saturated cases with
+server-backed ones. See [docs/cases.md](cases.md#groq-results-for-the-new-categories)
+for the new categories.
+
 `refusal` and `chaining` carry the signal — confirmed by 3 replicated runs per case,
 not a single sample. In the last full sweep (3 models × 21 cases × 3 runs, 189
 case-runs total), `selection`, `arguments` and `restraint` passed every run for every
@@ -21,7 +26,7 @@ over run.
 LiveMCPBench — a benchmark in the same space — found 23 repeated evaluations of one
 identical setup swing 57.9%–76.8%, a 19-point spread wide enough to reorder a
 leaderboard ([validity audit, arXiv 2607.02577](https://arxiv.org/html/2607.02577v1)).
-Our 3-run replication not splitting could mean these 21 cases are genuinely simpler and
+Our 3-run replication not splitting could mean those 21 cases were genuinely simpler and
 lower-variance than that benchmark's tasks — plausible, since ours are single- and
 few-step decisions, not long multi-turn agentic runs — or it could mean 3 runs isn't
 enough to catch a rarer variance mode. Both are live possibilities; 3-for-3 is

@@ -5,18 +5,20 @@ Reference for `cases.json`. Back to the [README](../README.md).
 ## Cases
 
 `cases.json` has two top-level keys: `tools` (a registry of OpenAI-format
-function schemas, keyed by name) and `cases` (which reference tools by name).
+function schemas, keyed by name) and `cases`. A canned case references the registry by
+name; a server-backed case declares `mcp_servers` instead and never touches it.
 
 ```json
 {
-  "id": "selection_calendar_lookup",
+  "id": "selection_search_vs_lookup",
   "type": "single_call",
   "category": "selection",
-  "prompt": "What's on maria's calendar on 2026-03-12?",
-  "available_tools": ["calendar_lookup", "search_documents", "create_task"],
+  "prompt": "Maria has a design review booked sometime this year but I don't know which day. Find it.",
+  "available_tools": ["search_calendar", "calendar_lookup", "search_documents"],
   "expected_tool_call": {
-    "name": "calendar_lookup",
-    "args": { "person": "maria", "date": "2026-03-12" }
+    "name": "search_calendar",
+    "args": { "person": "maria", "query": "design review" },
+    "loose_args": ["query"]
   }
 }
 ```
@@ -38,20 +40,24 @@ case its id: ids are `<category>_<specific>`, enforced by
 
 | category | probes | cases |
 |---|---|---|
-| `selection` | picking the right tool, including over a near-miss distractor | 7 |
-| `arguments` | filling args correctly — ISO dates, enum values, omitting optional ones | 4 |
+| `selection` | picking the right tool, including over a near-miss distractor | 2 |
+| `arguments` | filling args correctly — ISO dates, omitting optional ones | 2 |
 | `chaining` | multi-step work that depends on reading tool output | 5 |
 | `restraint` | *not* calling a tool when the answer is plain text | 2 |
 | `refusal` | asking instead of fabricating a missing required value | 3 |
+| `server_chaining` | multi-step work on real server output (query a database, act on the result) | 2 |
+| `registry` | picking the one right tool out of a 22-tool prompt from two servers | 2 |
+| `collision` | two servers expose the same tool name and only one is correct | 2 |
 
 Cases are stored grouped by category, so `results.md` reads in a sensible order.
 
-The two labels overlap today — `chaining` is exactly `multi_call_chain`, `refusal` is
-exactly `should_refuse`, and `category` only genuinely subdivides `single_call` into
-`selection` vs `arguments`. They are kept separate because the overlap is a fact about
-the current 21 cases, not about the design: a chaining case that should refuse
-mid-chain, or a refusal case where a tool is available and args are partial, both break
-the correlation without needing a schema change.
+The two labels overlap today — `chaining` and `server_chaining` are `multi_call_chain`,
+`refusal` is exactly `should_refuse`, `restraint` is `no_call`, and `registry` and
+`collision` are `single_call` like `selection` and `arguments`. They are kept separate
+because the overlap is a fact about the current 20 cases, not about the design: a
+chaining case that should refuse mid-chain, or a refusal case where a tool is
+available and args are partial, both break the correlation without needing a schema
+change.
 
 Optional per-case keys:
 
@@ -125,9 +131,10 @@ scoring tweak.
 
 ## Server-backed cases
 
-A case may declare real stdio MCP servers instead of hand-written tools. These live in
-`mcp_smoke.json` (run with `--suite mcp_smoke.json`), whose top level has no `tools`
-registry:
+A case may declare real stdio MCP servers instead of hand-written tools. Six live in
+`cases.json` (the `server_chaining`, `registry` and `collision` categories, below) and
+three in `mcp_smoke.json` (run with `--suite mcp_smoke.json`), a smoke of the path whose
+top level has no `tools` registry:
 
 ```json
 "mcp_servers": {
@@ -154,18 +161,70 @@ registry:
   note starting `mcp server error:`; the sweep continues. Infrastructure failures and
   model failures are only distinguishable by that prefix.
 
+### The server-backed categories
+
+These three exist because the saturated canned categories could not separate models.
+Each is `cases.json` data only; no scoring code is specific to them.
+
+- **`server_chaining`** (`multi_call_chain`, 2 cases) — a chain whose later steps depend
+  on real server output: query the shop database, then write the result to a file.
+  `server_chaining_top_customer_email` is built so that the obvious query is wrong
+  (the single largest order belongs to a different customer than the highest *total*).
+  The last step pins `content`, so the model can only pass by reading the real result.
+  The prompt names the tables and columns, so the exact-sequence scorer does not
+  penalise a `list_tables` first call.
+- **`registry`** (`single_call`, 2 cases) — one filesystem and one sqlite server with no
+  allow-list: 22 tools, ~4k tokens of schema, in one prompt. The correct tool is unique
+  (`move_file`, `write_query`). Single-call on purpose: a chain would cost 2–3 requests
+  of that size per run and exhaust qwen's token budget (see
+  [rate limits](rate-limits.md)).
+- **`collision`** (`single_call`, 2 cases) — two servers expose the same tool name and
+  only one holds the answer: two sqlite servers (`crm`, `billing`), and two filesystem
+  roots with a same-named `todo.txt` of different content. Each server's allow-list is the
+  single tool in question, so an exploratory first call cannot fail the case for a reason
+  unrelated to the collision.
+
+**Ground-truth assumptions.** The collision cases test role → server-name mapping, not
+path discovery: the sqlite collision is path-free, and the file collision names both
+roots in the prompt (each sandbox path ends in its server name). They assume the model
+should pick the server by role instead of probing both; calling both fails
+`single_call` ("expected 1 call"). Registry cases assume a unique correct tool. Every
+sqlite prompt supplies its table and column names.
+
+### Groq results for the new categories
+
+Not yet recorded: no Groq sweep of the 20-case suite has run. When one does, each of
+`server_chaining`, `registry` and `collision` gets one entry here: either the failing
+runs observed, or a saturation flag with the reason the category is kept. A category
+left inconclusive by `api error:` / `mcp server error:` runs gets neither.
+
 ## Adding to the suite
 
 - **New case** — add an object to `cases`, in its category's block, named
   `<category>_<specific>`. If it needs a new tool, add the schema to `tools` first. No
   Python changes. `uv run pytest` will tell you if the id, category, or grouping is off.
-- **New server-backed case** — add it to `mcp_smoke.json` (or a new suite file) with
-  `mcp_servers`, using an existing `kind`; add seed data under `fixtures/` if needed. A
-  new kind of server needs an entry in `config.MCP_SERVER_KINDS` with a pinned version.
+- **New server-backed case** — add it to `cases.json` (in its category's block) or to
+  `mcp_smoke.json` or a new suite file, with `mcp_servers` and an existing `kind`; add
+  seed data under `fixtures/` if needed. A new kind of server needs an entry in
+  `config.MCP_SERVER_KINDS` with a pinned version. Keep the suite within the 15–20 case
+  sweep budget (`test_suite_size_within_sweep_budget`).
 - **New category** — add it to `CATEGORIES` in `tests/test_suite_integrity.py` and give
   it at least one case. Reporting picks it up automatically from the data.
 - **New model** — append to `MODELS` in `config.py`, or pass `--models` at runtime.
 
-Coverage is uneven by design-so-far, not by intent: `arguments` and `restraint` have
-only two cases each. Those are the obvious places to add.
+## Removed cases
 
+SOL-103 cut `selection` from 7 cases to 2 and `arguments` from 4 to 2. All seven passed
+3/3 for all three models in the last full sweep (see [findings](findings.md)), so they
+contributed no discriminating evidence. Each is listed with what it tested and which
+kept case still covers it.
+
+| removed case | what it tested | still covered by |
+|---|---|---|
+| `selection_calendar_lookup` | direct single-tool pick among 3 | `selection_search_vs_lookup` (near-miss distractor) |
+| `selection_create_task` | direct `create_task` pick among unrelated tools | `selection_update_vs_create` |
+| `selection_search_before_fetch` | `search_documents` over `get_document` when only a title is given | `selection_search_vs_lookup` |
+| `selection_search_documents` | direct `search_documents` pick among unrelated tools | `selection_search_vs_lookup` |
+| `selection_task_vs_reminder` | `create_task` over `create_reminder` / `update_task` | `selection_update_vs_create` |
+| `arguments_enum_value` | filling an enum value (`in_progress`) | `arguments_omit_optional` (`forbidden_args`) |
+| `arguments_verbatim_recipient` | string passthrough to `recipient` | `arguments_date_to_iso` (exact-value checking) |
