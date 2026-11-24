@@ -4,7 +4,7 @@ Back to the [README](../README.md).
 
 
 See **Scope** in the README for the three big ones (no MCP protocol beyond a stdio slice,
-self-hosting only run as a 10-case, 1-run subset of the old 21-case suite on one machine
+self-hosting only run as one 1-run sweep of the 20-case suite per model on one machine
 under Ollama — see [local-ollama.md](local-ollama.md) — and not a certification). They
 still hold for the 20-case sweep. Its 6 server-backed cases (plus the 3 in
 `mcp_smoke.json`) cover stdio `tools/list` / `tools/call` against two pinned reference
@@ -34,13 +34,14 @@ prompts or auth); the other 14 cases are canned. The rest, specific to the curre
   Not yet independently reviewed.
 - `selection`, `arguments`, and `restraint` were saturated — every model tested cleared
   them completely across 3 replicated runs in the last full sweep, which ran the old
-  21-case suite (13 of 21 cases); the two local Qwen3 models also passed every run of the
-  2 cases per category they were given, 1 run each, which is weaker evidence. SOL-103 cut
-  them to 6 sanity cases (2 each) and added `server_chaining`, `registry` and
-  `collision`. `results.md` labels a saturated category explicitly. Whether the new
-  categories discriminate is recorded per category in
-  [docs/cases.md](cases.md#groq-results-for-the-new-categories) once a Groq sweep of
-  the 20-case suite has run; until then it is untested.
+  21-case suite (13 of 21 cases). SOL-103 cut them to 6 sanity cases (2 each) and added
+  `server_chaining`, `registry` and `collision`. `results.md` labels a saturated
+  category explicitly. Whether the new categories discriminate is recorded per category
+  in [docs/cases.md](cases.md#groq-results-for-the-new-categories) once a Groq sweep of
+  the 20-case suite has run; none has yet. The only data so far is the
+  local Ollama CPU run ([local-ollama.md](local-ollama.md), 1 run per case): both Qwen3
+  models passed every `registry` and `collision` run (2/2 each, `34%–100%`) and went 1/2
+  on `server_chaining` (`9%–91%`), which is too little to call either way.
 - Wilson intervals describe sampling uncertainty at fixed `temperature=0` output —
   they say nothing about whether a differently-phrased prompt or a different day's
   model snapshot would reproduce the same numbers. Repeats answer "is this noise
