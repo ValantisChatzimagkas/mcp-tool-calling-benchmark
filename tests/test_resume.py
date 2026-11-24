@@ -36,10 +36,10 @@ def archives(fake):
     return sorted(glob.glob(str(fake.tmp_path / "results.journal.*.jsonl")))
 
 
-def make_record(suite, case_id=CASE, run_index=0, model="m4b", **overrides):
+def make_record(main_suite, case_id=CASE, run_index=0, model="m4b", **overrides):
     """A journal record as `main` would write it, keyed to the current config."""
-    case = next(c for c in suite["cases"] if c["id"] == case_id)
-    tools = [suite["tools"][name] for name in case["available_tools"]]
+    case = next(c for c in main_suite["cases"] if c["id"] == case_id)
+    tools = [main_suite["tools"][name] for name in case["available_tools"]]
     record = {
         "backend": config.BACKEND,
         "endpoint": config.API_BASE_URL,
@@ -57,9 +57,9 @@ def make_record(suite, case_id=CASE, run_index=0, model="m4b", **overrides):
     return record
 
 
-def seed(fake, suite, runs=3, **kwargs):
+def seed(fake, main_suite, runs=3, **kwargs):
     for index in range(runs):
-        journal.append(str(live_journal(fake)), make_record(suite, run_index=index, **kwargs))
+        journal.append(str(live_journal(fake)), make_record(main_suite, run_index=index, **kwargs))
 
 
 # --- journal units -----------------------------------------------------------
@@ -76,9 +76,9 @@ def test_journal_load_of_a_missing_file_is_empty(tmp_path):
     assert journal.load(str(tmp_path / "nope.jsonl")) == []
 
 
-def test_fingerprint_changes_with_the_case_and_with_its_tools(suite):
-    case = next(c for c in suite["cases"] if c["id"] == CASE)
-    tools = [suite["tools"][n] for n in case["available_tools"]]
+def test_fingerprint_changes_with_the_case_and_with_its_tools(main_suite):
+    case = next(c for c in main_suite["cases"] if c["id"] == CASE)
+    tools = [main_suite["tools"][n] for n in case["available_tools"]]
     base = journal.case_fingerprint(case, tools)
 
     assert base == journal.case_fingerprint(copy.deepcopy(case), copy.deepcopy(tools))
@@ -103,10 +103,15 @@ def test_archive_never_overwrites_an_earlier_archive(tmp_path):
 # --- build_rows --------------------------------------------------------------
 
 
-def rows_for(suite, records, runs=3, infos=None):
-    cases = [c for c in suite["cases"] if c["id"] == CASE]
+def rows_for(main_suite, records, runs=3, infos=None):
+    cases = [c for c in main_suite["cases"] if c["id"] == CASE]
     return build_rows(
-        records, ["m4b"], cases, suite["tools"], runs, infos or {"m4b": ModelInfo("Q4_K_M", True)}
+        records,
+        ["m4b"],
+        cases,
+        main_suite["tools"],
+        runs,
+        infos or {"m4b": ModelInfo("Q4_K_M", True)},
     )
 
 
@@ -118,25 +123,27 @@ def rows_for(suite, records, runs=3, infos=None):
         ([None, None, None], ""),
     ],
 )
-def test_row_context_length_is_mixed_when_runs_disagree(suite, contexts, expected):
-    records = [make_record(suite, run_index=i, context_length=c) for i, c in enumerate(contexts)]
+def test_row_context_length_is_mixed_when_runs_disagree(main_suite, contexts, expected):
+    records = [
+        make_record(main_suite, run_index=i, context_length=c) for i, c in enumerate(contexts)
+    ]
 
-    (row,) = rows_for(suite, records)
+    (row,) = rows_for(main_suite, records)
     assert row["context_length"] == expected
 
 
-def test_row_run_timestamp_is_earliest_run(suite):
+def test_row_run_timestamp_is_earliest_run(main_suite):
     times = ["2026-11-23T10:05:00+00:00", "2026-11-23T10:01:00+00:00", "2026-11-23T10:09:00+00:00"]
-    records = [make_record(suite, run_index=i, timestamp=t) for i, t in enumerate(times)]
+    records = [make_record(main_suite, run_index=i, timestamp=t) for i, t in enumerate(times)]
 
-    (row,) = rows_for(suite, records)
+    (row,) = rows_for(main_suite, records)
     assert row["run_timestamp"] == "2026-11-23T10:01:00+00:00"
 
 
-def test_build_rows_ignores_records_beyond_the_requested_runs(suite):
-    records = [make_record(suite, run_index=i) for i in range(3)]
+def test_build_rows_ignores_records_beyond_the_requested_runs(main_suite):
+    records = [make_record(main_suite, run_index=i) for i in range(3)]
 
-    (row,) = rows_for(suite, records, runs=2)
+    (row,) = rows_for(main_suite, records, runs=2)
     assert (row["runs_passed"], row["runs_total"]) == (2, 2)
 
 
@@ -149,10 +156,10 @@ def test_build_rows_ignores_records_beyond_the_requested_runs(suite):
         {"case_hash": "0" * 16},
     ],
 )
-def test_build_rows_ignores_records_from_other_conditions(suite, overrides):
-    records = [make_record(suite, run_index=i, **overrides) for i in range(3)]
+def test_build_rows_ignores_records_from_other_conditions(main_suite, overrides):
+    records = [make_record(main_suite, run_index=i, **overrides) for i in range(3)]
 
-    (row,) = rows_for(suite, records)
+    (row,) = rows_for(main_suite, records)
     assert row["runs_total"] == 0
 
 
@@ -200,8 +207,8 @@ def test_interrupted_sweep_resumes_without_rerunning_completed_runs(
     assert comparable(resumed) == comparable(control)
 
 
-def test_nonempty_journal_without_resume_aborts_and_leaves_it_untouched(fake_ollama, suite):
-    seed(fake_ollama, suite, runs=2)
+def test_nonempty_journal_without_resume_aborts_and_leaves_it_untouched(fake_ollama, main_suite):
+    seed(fake_ollama, main_suite, runs=2)
     before = live_journal(fake_ollama).read_bytes()
 
     with pytest.raises(SystemExit) as exc:
@@ -212,9 +219,9 @@ def test_nonempty_journal_without_resume_aborts_and_leaves_it_untouched(fake_oll
     assert fake_ollama.chat_requests == []
 
 
-def test_resume_reruns_runs_whose_case_changed(fake_ollama, suite, monkeypatch):
-    seed(fake_ollama, suite, runs=3)  # journaled against the original prompt
-    changed = copy.deepcopy(suite)
+def test_resume_reruns_runs_whose_case_changed(fake_ollama, main_suite, monkeypatch):
+    seed(fake_ollama, main_suite, runs=3)  # journaled against the original prompt
+    changed = copy.deepcopy(main_suite)
     for case in changed["cases"]:
         if case["id"] == CASE:
             case["prompt"] = "A different question, in one sentence?"
@@ -232,8 +239,8 @@ def test_resume_reruns_runs_whose_case_changed(fake_ollama, suite, monkeypatch):
     [{"quantization": "Q8_0"}, {"endpoint": "http://another-host:11434/v1"}],
     ids=["quantization", "endpoint"],
 )
-def test_resume_reruns_when_quantization_or_endpoint_differs(fake_ollama, suite, seeded):
-    seed(fake_ollama, suite, runs=2, **seeded)
+def test_resume_reruns_when_quantization_or_endpoint_differs(fake_ollama, main_suite, seeded):
+    seed(fake_ollama, main_suite, runs=2, **seeded)
 
     main(["--models", "m4b", "--cases", CASE, "--runs", "2", "--resume"])
 
@@ -242,8 +249,8 @@ def test_resume_reruns_when_quantization_or_endpoint_differs(fake_ollama, suite,
     assert (row["runs_passed"], row["runs_total"], row["quantization"]) == ("2", "2", "Q4_K_M")
 
 
-def test_resume_with_fewer_runs_ignores_extra_journaled_runs(fake_ollama, suite):
-    seed(fake_ollama, suite, runs=3)
+def test_resume_with_fewer_runs_ignores_extra_journaled_runs(fake_ollama, main_suite):
+    seed(fake_ollama, main_suite, runs=3)
 
     main(["--models", "m4b", "--cases", CASE, "--runs", "2", "--resume"])
 

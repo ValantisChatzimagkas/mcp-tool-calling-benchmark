@@ -10,8 +10,11 @@ import csv
 import json
 import math
 import os
+import re
+import shutil
 import sys
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import config
@@ -24,21 +27,28 @@ from client import (
     loaded_context_length,
     parse_tool_calls,
 )
+from mcp_client import McpServerError, McpServers, ServerSpec
+from sandbox import confine, ensure_installed, open_sandbox, runtime_prefix
 from scoring import score_chain, score_no_call, score_refusal, score_single_call
 
 
 def load_suite(path):
-    """Read cases.json. Returns (tool_registry, cases)."""
+    """Read a suite file. Returns (tool_registry, cases); the registry may be empty."""
     with open(path) as f:
         suite = json.load(f)
-    return suite["tools"], suite["cases"]
+    return suite.get("tools", {}), suite["cases"]
 
 
-def run_chain(model, case, tools):
-    """Drive a multi-turn tool loop with canned tool results; return calls in order."""
+def canned_executor(case):
+    """Executor for classic cases: the canned `tool_results` entry, or "{}" if unlisted."""
+    canned = case.get("tool_results", {})
+    return lambda name, call_args: canned.get(name, "{}")
+
+
+def run_chain(model, case, tools, execute):
+    """Drive a multi-turn tool loop; `execute(name, args)` supplies each tool result."""
     messages = [{"role": "user", "content": case["prompt"]}]
     observed = []
-    canned = case.get("tool_results", {})
 
     for _ in range(config.MAX_CHAIN_STEPS):
         message = chat(model, messages, tools)
@@ -59,7 +69,7 @@ def run_chain(model, case, tools):
                 {
                     "role": "tool",
                     "tool_call_id": raw.get("id", ""),
-                    "content": canned.get(name, "{}"),
+                    "content": execute(name, call_args),
                 }
             )
         time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
@@ -67,17 +77,74 @@ def run_chain(model, case, tools):
     return observed
 
 
+_PLACEHOLDER = re.compile(r"\$\{([^}]*)\}")
+
+
 def case_tools(case, tool_registry):
     """The tool schemas a case actually sends to the model."""
-    return [tool_registry[name] for name in case["available_tools"]]
+    return [tool_registry[name] for name in case.get("available_tools", [])]
 
 
-def run_case(model, case, tool_registry) -> tuple[bool, str]:
-    """Run one case against one model and score it."""
-    tools = case_tools(case, tool_registry)
+def substitute_paths(value, paths):
+    """Replace `${server}` with that server's sandbox path throughout a str/list/dict.
 
+    An unknown name raises KeyError: a typo must fail the run, not pass an unsubstituted
+    string through to scoring.
+    """
+    if isinstance(value, str):
+        return _PLACEHOLDER.sub(lambda m: str(paths[m.group(1)]), value)
+    if isinstance(value, list):
+        return [substitute_paths(item, paths) for item in value]
+    if isinstance(value, dict):
+        return {key: substitute_paths(item, paths) for key, item in value.items()}
+    return value
+
+
+def _launch(name, server, kind, install_dir, sandbox):
+    """Resolve one server's launch line and wrap it in the configured confinement."""
+    fill = {"{install}": str(install_dir or ""), "{path}": str(sandbox.paths[name])}
+
+    def resolve(text):
+        for key, value in fill.items():
+            text = text.replace(key, value)
+        return text
+
+    command = resolve(kind["command"])
+    args = [resolve(arg) for arg in kind["args"]]
+    readonly = []
+    if install_dir is not None:
+        if kind["runtime"] == "node":
+            command = shutil.which(command) or command
+        readonly = [install_dir, runtime_prefix(kind, install_dir)]
+    command, args = confine(command, args, sandbox.dirs[name], readonly)
+    return ServerSpec(name, command, args, server.get("tools"))
+
+
+@contextmanager
+def open_mcp_case(case):
+    """Start a case's servers in a fresh sandbox. Yields (tools, execute, paths)."""
+    kinds = config.MCP_SERVER_KINDS
+    servers = case["mcp_servers"]
+    for name, server in servers.items():
+        if server["kind"] not in kinds:
+            raise McpServerError(f"server {name!r}: unknown kind {server['kind']!r}")
+    # Installs happen first, outside any sandbox, so a failure never leaves one behind.
+    installs = {
+        kind: ensure_installed(kind, kinds[kind]) for kind in {s["kind"] for s in servers.values()}
+    }
+
+    with open_sandbox(servers, kinds, config.FIXTURES_DIR) as sandbox:
+        specs = [
+            _launch(name, server, kinds[server["kind"]], installs[server["kind"]], sandbox)
+            for name, server in servers.items()
+        ]
+        with McpServers(specs) as running:
+            yield running.tools, running.call, sandbox.paths
+
+
+def _score_case(model, case, tools, execute) -> tuple[bool, str]:
     if case["type"] == "multi_call_chain":
-        observed = run_chain(model, case, tools)
+        observed = run_chain(model, case, tools, execute)
         return score_chain(observed, case["expected_tool_call"]["sequence"])
 
     message = chat(model, [{"role": "user", "content": case["prompt"]}], tools)
@@ -90,6 +157,24 @@ def run_case(model, case, tool_registry) -> tuple[bool, str]:
     if case["type"] == "no_call":
         return score_no_call(calls, message)
     return False, f"unknown case type: {case['type']}"
+
+
+def run_case(model, case, tool_registry) -> tuple[bool, str]:
+    """Run one case against one model and score it.
+
+    A case either lists hand-written `available_tools` (canned results) or declares
+    `mcp_servers` (real tools, executed through `tools/call` in a per-run sandbox).
+    """
+    if "mcp_servers" in case:
+        with open_mcp_case(case) as (tools, execute, paths):
+            resolved = dict(case)
+            for key in ("prompt", "expected_tool_call", "expected_refusal"):
+                if key in resolved:
+                    resolved[key] = substitute_paths(resolved[key], paths)
+            return _score_case(model, resolved, tools, execute)
+
+    tools = [tool_registry[name] for name in case["available_tools"]]
+    return _score_case(model, case, tools, canned_executor(case))
 
 
 def summarize_runs(results) -> tuple[int, int, str]:
@@ -116,8 +201,20 @@ def run_once(model, case, tool_registry) -> tuple[bool, str]:
         raise
     except ApiError as exc:
         return False, f"api error: {exc}"
+    except McpServerError as exc:
+        return False, f"mcp server error: {exc}"
     except Exception as exc:  # a broken case must not kill the sweep
         return False, f"{type(exc).__name__}: {exc}"
+
+
+def run_case_repeated(model, case, tool_registry, runs) -> tuple[int, int, str]:
+    """Run one case `runs` times, without the journal, and summarize."""
+    results = []
+    for index in range(runs):
+        results.append(run_once(model, case, tool_registry))
+        if index < runs - 1:
+            time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
+    return summarize_runs(results)
 
 
 CSV_COLUMNS = [
@@ -288,7 +385,7 @@ CATEGORY_NOTES = {
 }
 
 
-def write_markdown(rows, models, cases, runs, run_started, path):
+def write_markdown(rows, models, cases, runs, run_started, path, suite_path):
     """Run metadata, per-category pass rates, a result matrix, and every failure note.
 
     Every rate is passed runs over total runs, so a case that passes 2 of 3 counts as
@@ -311,6 +408,7 @@ def write_markdown(rows, models, cases, runs, run_started, path):
         f"- **Run:** {run_started:%Y-%m-%d %H:%M UTC}",
         f"- **Backend:** `{config.BACKEND}`",
         f"- **Endpoint:** `{config.API_BASE_URL}`",
+        f"- **Suite:** `{suite_path}`",
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
         f"- **Models:** {len(models)}"
         + (f" ({len(unsupported)} unsupported)" if unsupported else ""),
@@ -416,6 +514,11 @@ def main(argv=None):
         action="store_true",
         help="continue an interrupted sweep from its journal instead of refusing to start",
     )
+    parser.add_argument(
+        "--suite",
+        default=config.CASES_PATH,
+        help=f"suite file to run (default {config.CASES_PATH})",
+    )
     args = parser.parse_args(argv)
 
     runs = args.runs if args.runs is not None else config.RUNS_PER_CASE
@@ -434,7 +537,7 @@ def main(argv=None):
     if not args.resume and os.path.exists(journal_path) and os.path.getsize(journal_path) > 0:
         sys.exit(f"journal exists; pass --resume to continue it, or delete {journal_path}")
 
-    tool_registry, all_cases = load_suite(config.CASES_PATH)
+    tool_registry, all_cases = load_suite(args.suite)
     cases = all_cases
     if args.cases:
         wanted = set(args.cases)
@@ -527,7 +630,7 @@ def main(argv=None):
     run_started = datetime.fromisoformat(min(stamps)) if stamps else started
 
     write_csv(rows, config.RESULTS_CSV_PATH)
-    write_markdown(rows, models, cases, runs, run_started, config.RESULTS_MD_PATH)
+    write_markdown(rows, models, cases, runs, run_started, config.RESULTS_MD_PATH, args.suite)
     print(f"\nWrote {config.RESULTS_CSV_PATH} and {config.RESULTS_MD_PATH}")
 
     # Only after both result files exist: a crash above leaves the journal for --resume.

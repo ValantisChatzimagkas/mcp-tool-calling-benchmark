@@ -53,7 +53,9 @@ built from the run journal described below:
   its `runs_total` is zero, such a row sits outside every category and overall rollup,
   and `results.md` shows `unsupported` in its place. (Only Ollama reports capabilities;
   Groq models are always treated as supported.)
-- `results.md` — run metadata, a pass-rate table broken down by category, the full
+- `results.md` — run metadata (including the suite file it was produced from, so a
+  `--suite` run can't be mistaken for the main sweep), a pass-rate table broken down by
+  category, the full
   result matrix grouped by category (`passed/total` per cell), and every failure note
 
 Every rate — per category and overall — is passed runs over total runs, so a case that

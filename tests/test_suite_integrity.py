@@ -7,8 +7,12 @@ They also pin down the suite's conventions (category names, the `<category>_<spe
 id scheme, grouping) so it can't drift back into ad-hoc naming as cases get added.
 """
 
+import re
+from pathlib import Path
+
 import pytest
 
+import config
 from client import ModelInfo
 from run_eval import CSV_COLUMNS, _cell, _fraction, _tally, unsupported_rows, wilson_interval
 
@@ -21,9 +25,9 @@ def test_case_ids_are_unique(suite):
 
 
 def test_every_case_references_defined_tools(suite):
-    tools = set(suite["tools"])
+    tools = set(suite.get("tools", {}))
     for case in suite["cases"]:
-        unknown = [t for t in case["available_tools"] if t not in tools]
+        unknown = [t for t in case.get("available_tools", []) if t not in tools]
         assert not unknown, f"{case['id']} references undefined tool(s): {unknown}"
 
 
@@ -38,7 +42,7 @@ def test_every_single_call_case_constrains_at_least_one_arg(suite):
 
 def test_every_chain_step_is_available_and_has_a_canned_result(suite):
     for case in suite["cases"]:
-        if case["type"] != "multi_call_chain":
+        if case["type"] != "multi_call_chain" or "available_tools" not in case:
             continue
         for step in case["expected_tool_call"]["sequence"]:
             name = step if isinstance(step, str) else step["name"]
@@ -90,10 +94,95 @@ def test_every_should_refuse_case_declares_what_is_missing(suite):
         assert spec.get("must_mention"), f"{case['id']}: expected_refusal names nothing"
 
 
-def test_every_category_has_at_least_one_case(suite):
+def test_every_category_has_at_least_one_case(main_suite):
     """A category that exists only in docs is a gap in the suite, not a category."""
-    present = {case["category"] for case in suite["cases"]}
+    present = {case["category"] for case in main_suite["cases"]}
     assert present == CATEGORIES, f"unused categories: {sorted(CATEGORIES - present)}"
+
+
+# --- server-backed cases ------------------------------------------------------
+# A case declares `available_tools` (hand-written, canned results) or `mcp_servers`
+# (real servers), never both and never neither.
+
+SERVER_NAME = re.compile(r"^[a-z][a-z0-9_]*$")
+PLACEHOLDER = re.compile(r"\$\{([^}]*)\}")
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+
+
+def _expected_names(case):
+    expected = case.get("expected_tool_call", {})
+    if "sequence" in expected:
+        return [s if isinstance(s, str) else s["name"] for s in expected["sequence"]]
+    return [expected["name"]] if "name" in expected else []
+
+
+def test_cases_declare_exactly_one_tool_source(suite):
+    for case in suite["cases"]:
+        has_tools, has_servers = "available_tools" in case, "mcp_servers" in case
+        assert has_tools != has_servers, (
+            f"{case['id']}: needs exactly one of available_tools / mcp_servers"
+        )
+
+
+def test_server_backed_cases_have_no_tool_results(suite):
+    for case in suite["cases"]:
+        if "mcp_servers" in case:
+            assert "tool_results" not in case, f"{case['id']}: real servers produce the results"
+
+
+def test_server_kinds_and_fixtures_exist(suite):
+    for case in suite["cases"]:
+        for name, server in case.get("mcp_servers", {}).items():
+            assert server["kind"] in config.MCP_SERVER_KINDS, (
+                f"{case['id']}: server {name!r} has unknown kind {server['kind']!r}"
+            )
+            assert (Path(config.FIXTURES_DIR) / server["fixture"]).exists(), (
+                f"{case['id']}: fixture {server['fixture']!r} not found under {config.FIXTURES_DIR}"
+            )
+
+
+def test_allow_list_is_nonempty_list_of_strings_when_present(suite):
+    for case in suite["cases"]:
+        for name, server in case.get("mcp_servers", {}).items():
+            if "tools" not in server:
+                continue
+            allow = server["tools"]
+            assert isinstance(allow, list) and allow, f"{case['id']}/{name}: empty allow-list"
+            assert all(isinstance(t, str) for t in allow), f"{case['id']}/{name}: non-string tool"
+
+
+def test_server_names_are_valid_and_expected_tools_are_prefixed(suite):
+    for case in suite["cases"]:
+        servers = case.get("mcp_servers")
+        if not servers:
+            continue
+        for name in servers:
+            assert SERVER_NAME.match(name) and "__" not in name, (
+                f"{case['id']}: bad server name {name!r}"
+            )
+        for tool in _expected_names(case):
+            assert any(tool.startswith(f"{name}__") for name in servers), (
+                f"{case['id']}: expected tool {tool!r} has no declared <server>__ prefix"
+            )
+
+
+def test_placeholders_name_declared_servers(suite):
+    for case in suite["cases"]:
+        servers = case.get("mcp_servers", {})
+        for key in ("prompt", "expected_tool_call", "expected_refusal"):
+            for text in _strings(case.get(key, "")):
+                for name in PLACEHOLDER.findall(text):
+                    assert name in servers, f"{case['id']}: ${{{name}}} is not a declared server"
 
 
 # --- the results rollup -----------------------------------------------------
