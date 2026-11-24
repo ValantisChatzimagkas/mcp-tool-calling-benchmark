@@ -7,10 +7,12 @@ server, or --resume would silently reuse runs made against other tools. Run thro
 fake Ollama (conftest.py) with the fake stdio server from tests/fake_mcp_server.py.
 """
 
+import concurrent.futures
 import copy
 import csv
 import json
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -213,3 +215,43 @@ def test_dead_model_server_mid_server_case_aborts_without_journaling_the_run(mcp
     assert "--resume" in str(exc.value) and "unreachable" in str(exc.value)
     journal_path = mcp_env.tmp_path / "results.journal.jsonl"
     assert journal.load(str(journal_path)) == []
+
+
+def test_ctrl_c_during_a_server_tool_call_stops_the_sweep_without_journaling(mcp_env, monkeypatch):
+    # Ctrl-C lands in the main thread while it waits on the server's `tools/call` result.
+    # It must reach main's interrupt path, not be scored as a failed run that --resume
+    # would then treat as done.
+    case = server_case(
+        id="chaining_fake_server",
+        type="multi_call_chain",
+        category="chaining",
+        prompt="Echo x.",
+        expected_tool_call={"sequence": [{"name": "docs__echo", "args": {"text": "x"}}]},
+    )
+    mcp_env.suite_path.write_text(json.dumps({"cases": [case]}))
+    real_result = concurrent.futures.Future.result
+
+    def interrupt_once(self, timeout=None):
+        if threading.current_thread() is threading.main_thread():
+            monkeypatch.setattr(concurrent.futures.Future, "result", real_result)
+            raise KeyboardInterrupt
+        return real_result(self, timeout)
+
+    def tool_call(model, messages, tools):
+        # The servers are up by now: interrupt the next wait, which is the tool call's.
+        monkeypatch.setattr(concurrent.futures.Future, "result", interrupt_once)
+        arguments = json.dumps({"text": "x"})
+        function = {"name": "docs__echo", "arguments": arguments}
+        return {
+            "content": None,
+            "tool_calls": [{"id": "c1", "type": "function", "function": function}],
+        }
+
+    monkeypatch.setattr(run_eval, "chat", tool_call)
+
+    with pytest.raises(SystemExit) as exc:
+        main(argv(mcp_env))
+
+    assert "interrupted" in str(exc.value) and "--resume" in str(exc.value)
+    assert journal.load(str(mcp_env.tmp_path / "results.journal.jsonl")) == []
+    assert list(mcp_env.tmp_path.glob("results.journal.*.jsonl")) == []  # nothing archived
