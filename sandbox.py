@@ -8,6 +8,7 @@ the sandbox into `config.MCP_SERVERS_DIR`; at run time they execute directly (ne
 step is the only network use in this module and goes through `_run_installer`.
 """
 
+import hashlib
 import json
 import os
 import shutil
@@ -207,3 +208,25 @@ def confine(
         argv += ["--ro-bind", str(path), str(path)]
     argv += ["--bind", str(writable), str(writable), "--", command, *args]
     return "bwrap", argv
+
+
+def fixture_digest(fixtures_dir: str, fixture: str | None) -> str | None:
+    """Content digest of one seed fixture (a file or a directory tree), or None if absent.
+
+    Pure file reads, no server and no network: this is what lets a case hash cover the
+    data a server-backed case's tool results come from. Names and bytes both count, so a
+    rename or an edit changes it.
+    """
+    if not fixture:
+        return None
+    root = Path(fixtures_dir) / fixture
+    if not root.exists():
+        return None
+    digest = hashlib.sha256()
+    files = [root] if root.is_file() else sorted(p for p in root.rglob("*") if p.is_file())
+    for path in files:
+        digest.update(path.relative_to(root).as_posix().encode() if path != root else b".")
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]

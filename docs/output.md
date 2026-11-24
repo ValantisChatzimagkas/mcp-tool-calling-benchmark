@@ -83,7 +83,17 @@ run in each row, since a resumed sweep spans sessions).
 - **A record is reused only if its whole key matches**: backend, endpoint, model,
   quantization, case id, case hash and run index. Edit a case's prompt or tools, switch
   quantization, or point at another host, and those runs execute again. A different
-  `--runs` just ignores journaled runs beyond the new count.
+  `--runs` just ignores journaled runs beyond the new count. For a server-backed case
+  (`mcp_servers`) the tool schemas come from the live server at run time, so the hash
+  covers what determines them instead: each server's pinned kind (package spec and
+  launch line from `config.MCP_SERVER_KINDS`) and a digest of its seed fixture under
+  `fixtures/`. Bumping a pin or editing a fixture reruns those cases; computing the hash
+  never starts a server or touches the network. It does not see a drift inside an
+  unpinned range (e.g. the `mcp<2` bound of the sqlite server).
+- **Server-backed failures.** A server that fails to start, or crashes mid-run, is
+  recorded as a failed run with an `mcp server error: ...` note (as for a sweep without
+  `--resume`); a model without tool support is still `unsupported` and never starts a
+  server.
 - **Server unreachable.** If the connection itself fails (refused, reset — a crashed or
   OOM-killed server), the sweep stops with `server unreachable (...); rerun with
   --resume` and that run is *not* journaled. Read timeouts and HTTP errors are still

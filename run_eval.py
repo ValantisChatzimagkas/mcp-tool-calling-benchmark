@@ -28,7 +28,7 @@ from client import (
     parse_tool_calls,
 )
 from mcp_client import McpServerError, McpServers, ServerSpec
-from sandbox import confine, ensure_installed, open_sandbox, runtime_prefix
+from sandbox import confine, ensure_installed, fixture_digest, open_sandbox, runtime_prefix
 from scoring import score_chain, score_no_call, score_refusal, score_single_call
 
 
@@ -81,8 +81,27 @@ _PLACEHOLDER = re.compile(r"\$\{([^}]*)\}")
 
 
 def case_tools(case, tool_registry):
-    """The tool schemas a case actually sends to the model."""
-    return [tool_registry[name] for name in case.get("available_tools", [])]
+    """What the model is given by a case, as a JSON-able value for the journal's case hash.
+
+    Hand-written cases: the tool schemas themselves. Server-backed cases: the schemas
+    come from the live server's `tools/list` at run time, which the hash must not need a
+    server (or network) for, so it covers what determines them instead: each server's
+    pinned kind (package versions, launch line) and the digest of its seed fixture, which
+    decides the tool results the model sees. Bumping a pin or editing a fixture changes
+    the hash, so `--resume` redoes those runs rather than reusing stale ones.
+    """
+    if "mcp_servers" in case:
+        kinds = config.MCP_SERVER_KINDS
+        return [
+            {
+                "mcp_server": name,
+                "kind": server["kind"],
+                "pin": kinds.get(server["kind"]),
+                "fixture_digest": fixture_digest(config.FIXTURES_DIR, server.get("fixture")),
+            }
+            for name, server in case["mcp_servers"].items()
+        ]
+    return [tool_registry[name] for name in case["available_tools"]]
 
 
 def substitute_paths(value, paths):
