@@ -57,20 +57,29 @@ def resolve_profile(name):
         raise ValueError(f"unknown BACKEND {name!r}; valid backends: {valid}") from None
 
 
-def resolve_api_key(profile, environ):
-    """The bearer token to send: the Groq key only to a backend that requires one.
+def key_required(profile, base_url):
+    """Whether this run needs the profile's key: the profile requires one and `base_url`
+    is the profile's own URL. An overridden API_BASE_URL is some other server."""
+    own = profile["api_base_url"].rstrip("/")
+    return profile["requires_api_key"] and base_url.rstrip("/") == own
+
+
+def resolve_api_key(profile, environ, base_url):
+    """The bearer token to send: the Groq key only to the profile's own URL, else "".
 
     A `.env` holding GROQ_API_KEY must never be sent to a server that doesn't ask for it.
+    That holds by URL, not by profile name: with BACKEND unset (groq) and API_BASE_URL
+    overridden, the overriding server gets no key, and the run goes out unauthenticated.
     """
-    return environ.get("GROQ_API_KEY", "") if profile["requires_api_key"] else ""
+    return environ.get("GROQ_API_KEY", "") if key_required(profile, base_url) else ""
 
 
 BACKEND = os.getenv("BACKEND", "groq")
 _profile = resolve_profile(BACKEND)
 
 API_BASE_URL = os.getenv("API_BASE_URL", _profile["api_base_url"])
-REQUIRES_API_KEY = _profile["requires_api_key"]
-API_KEY = resolve_api_key(_profile, os.environ)
+REQUIRES_API_KEY = key_required(_profile, API_BASE_URL)
+API_KEY = resolve_api_key(_profile, os.environ, API_BASE_URL)
 MODELS = list(_profile["models"])
 REQUEST_TIMEOUT_SECONDS = _profile["request_timeout_seconds"]
 DELAY_BETWEEN_CALLS_SECONDS = _profile["delay_between_calls_seconds"]

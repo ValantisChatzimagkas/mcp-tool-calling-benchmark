@@ -6,7 +6,9 @@ sends every output file into tmp_path.
 """
 
 import csv
+import importlib.util
 
+import dotenv
 import pytest
 
 import config
@@ -74,12 +76,51 @@ def test_groq_backend_makes_no_native_api_calls(fake_ollama, monkeypatch):
 def test_ollama_backend_sends_no_authorization_header(fake_ollama, monkeypatch):
     # A developer's .env holds a Groq key; the ollama profile must not leak it.
     env = {"GROQ_API_KEY": "gsk_secret"}
+    ollama, groq = config.resolve_profile("ollama"), config.resolve_profile("groq")
     monkeypatch.setattr(
-        config, "API_KEY", config.resolve_api_key(config.resolve_profile("ollama"), env)
+        config, "API_KEY", config.resolve_api_key(ollama, env, ollama["api_base_url"])
     )
-    assert config.resolve_api_key(config.resolve_profile("groq"), env) == "gsk_secret"
+    assert config.resolve_api_key(groq, env, groq["api_base_url"]) == "gsk_secret"
 
     main(["--models", "m4b", "--cases", "restraint_general_question", "--runs", "1"])
+
+    (request,) = fake_ollama.chat_requests
+    assert "authorization" not in request["headers"]
+
+
+def fresh_config(monkeypatch, **env):
+    """config.py evaluated anew under `env` alone: no .env file, no inherited settings."""
+    for name in ("BACKEND", "API_BASE_URL", "GROQ_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: None)
+    spec = importlib.util.spec_from_file_location("config_fresh", config.__file__)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_groq_key_goes_only_to_groq_own_url(monkeypatch):
+    hosted = fresh_config(monkeypatch, GROQ_API_KEY="gsk_secret")
+    assert (hosted.BACKEND, hosted.API_KEY, hosted.REQUIRES_API_KEY) == ("groq", "gsk_secret", True)
+
+    trailing = fresh_config(
+        monkeypatch, GROQ_API_KEY="gsk_secret", API_BASE_URL="https://api.groq.com/openai/v1/"
+    )
+    assert trailing.API_KEY == "gsk_secret"
+
+
+def test_overridden_base_url_under_default_backend_gets_no_groq_key(fake_ollama, monkeypatch):
+    # BACKEND unset (groq profile), the .env template's Groq key, and API_BASE_URL pointed
+    # at some other server: that server must not receive the Groq key.
+    fresh = fresh_config(monkeypatch, GROQ_API_KEY="gsk_secret", API_BASE_URL=fake_ollama.base_url)
+    assert (fresh.BACKEND, fresh.API_KEY, fresh.REQUIRES_API_KEY) == ("groq", "", False)
+
+    for name in ("BACKEND", "API_BASE_URL", "API_KEY", "REQUIRES_API_KEY", "NATIVE_API"):
+        monkeypatch.setattr(config, name, getattr(fresh, name))
+
+    main(["--models", "hosted", "--cases", "restraint_general_question", "--runs", "1"])
 
     (request,) = fake_ollama.chat_requests
     assert "authorization" not in request["headers"]
