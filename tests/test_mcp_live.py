@@ -19,6 +19,7 @@ import config
 import run_eval
 import sandbox
 from mcp_client import McpServerError
+from run_eval import load_suite, substitute_paths
 
 pytestmark = pytest.mark.live
 
@@ -211,3 +212,76 @@ def test_live_missing_server_name_is_reported_not_silently_dropped(bwrap_only):
     case = case_with({"docs": server("filesystem", "docs", ["no_such_tool"])})
     with pytest.raises(McpServerError, match="no_such_tool"), run_eval.open_mcp_case(case):
         pass
+
+
+# --- the suite's own server-backed cases (SOL-103) ------------------------------
+# Offline integrity tests can't tell whether an expected answer is reachable on the real
+# servers; these replay each gold path through them.
+
+NEW_CATEGORIES = ("server_chaining", "registry", "collision")
+SERVER_ERRORS = ("ENOENT", "Database error", "Access denied")
+
+# What a gold read must return, checked on the real servers (case id -> substring).
+GOLD_READS = {
+    "server_chaining_top_customer_email": "edsger@example.com",
+    "server_chaining_ticket_lookup": "donald@example.com",
+    "collision_same_name_file": "dentist",
+    "collision_same_name_query": "3",
+}
+
+
+def _suite_cases(*categories):
+    _registry, cases = load_suite(config.CASES_PATH)
+    return [c for c in cases if c["category"] in categories]
+
+
+def _gold_steps(case):
+    return case["expected_tool_call"].get("sequence", [case["expected_tool_call"]])
+
+
+def test_live_registry_exposes_at_least_20_tools(bwrap_only):
+    cases = _suite_cases("registry")
+    assert cases, "no registry cases in cases.json"
+    for case in cases:
+        with run_eval.open_mcp_case(case) as (tools, _execute, _paths):
+            assert len(tools) >= 20, f"{case['id']}: only {len(tools)} tools"
+
+
+def test_live_gold_paths_execute_against_real_servers(bwrap_only):
+    cases = _suite_cases(*NEW_CATEGORIES)
+    assert cases, "no server_chaining/registry/collision cases in cases.json"
+    for case in cases:
+        with run_eval.open_mcp_case(case) as (_tools, execute, paths):
+            results = []
+            for step in _gold_steps(case):
+                args = substitute_paths(step["args"], paths)
+                text = execute(step["name"], args)
+                assert not text.startswith(SERVER_ERRORS), f"{case['id']}: {step['name']}: {text}"
+                results.append(text)
+
+            wanted = GOLD_READS.get(case["id"])
+            if wanted:
+                assert any(wanted in text for text in results), f"{case['id']}: no {wanted!r}"
+            if case["category"] == "server_chaining":
+                last = substitute_paths(_gold_steps(case)[-1]["args"], paths)["content"]
+                assert any(last in text for text in results[:-1]), (
+                    f"{case['id']}: written content {last!r} is not in any earlier real output"
+                )
+            if case["id"] == "registry_move_file":
+                assert (paths["files"] / "final.txt").is_file()
+                assert not (paths["files"] / "draft.txt").exists()
+            if case["id"] == "registry_insert_row":
+                check = execute(
+                    "shop__read_query", {"query": "SELECT name FROM customers WHERE id = 4"}
+                )
+                assert "Leslie Lamport" in check, check
+
+            if case["category"] == "collision":
+                step = _gold_steps(case)[0]
+                right, bare = step["name"].split("__", 1)
+                for name, server in case["mcp_servers"].items():
+                    if name == right or bare not in server["tools"]:
+                        continue
+                    wrong_args = substitute_paths(step["args"], {**paths, right: paths[name]})
+                    wrong = execute(f"{name}__{bare}", wrong_args)
+                    assert wrong != results[0], f"{case['id']}: {name} gives the same answer"

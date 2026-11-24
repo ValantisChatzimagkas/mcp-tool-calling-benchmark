@@ -195,84 +195,6 @@
   },
   "cases": [
     {
-      "id": "selection_calendar_lookup",
-      "type": "single_call",
-      "category": "selection",
-      "prompt": "What's on maria's calendar on 2026-03-12?",
-      "available_tools": [
-        "calendar_lookup",
-        "search_documents",
-        "create_task"
-      ],
-      "expected_tool_call": {
-        "name": "calendar_lookup",
-        "args": {
-          "person": "maria",
-          "date": "2026-03-12"
-        }
-      }
-    },
-    {
-      "id": "selection_create_task",
-      "type": "single_call",
-      "category": "selection",
-      "prompt": "Create a task called \"Rotate the staging API keys\" and assign it to dimitris, due 2026-04-01.",
-      "available_tools": [
-        "create_task",
-        "calendar_lookup",
-        "send_message"
-      ],
-      "expected_tool_call": {
-        "name": "create_task",
-        "args": {
-          "title": "Rotate the staging API keys",
-          "assignee": "dimitris",
-          "due_date": "2026-04-01"
-        }
-      }
-    },
-    {
-      "id": "selection_search_before_fetch",
-      "type": "single_call",
-      "category": "selection",
-      "prompt": "Pull up the doc titled 'Incident postmortem 2026-02'.",
-      "available_tools": [
-        "get_document",
-        "search_documents",
-        "create_task"
-      ],
-      "expected_tool_call": {
-        "name": "search_documents",
-        "args": {
-          "query": "Incident postmortem 2026-02"
-        },
-        "loose_args": [
-          "query"
-        ]
-      }
-    },
-    {
-      "id": "selection_search_documents",
-      "type": "single_call",
-      "category": "selection",
-      "prompt": "Find our internal docs about the retention policy for audit logs.",
-      "available_tools": [
-        "search_documents",
-        "calendar_lookup",
-        "create_task",
-        "send_message"
-      ],
-      "expected_tool_call": {
-        "name": "search_documents",
-        "args": {
-          "query": "audit log retention policy"
-        },
-        "loose_args": [
-          "query"
-        ]
-      }
-    },
-    {
       "id": "selection_search_vs_lookup",
       "type": "single_call",
       "category": "selection",
@@ -290,27 +212,6 @@
         },
         "loose_args": [
           "query"
-        ]
-      }
-    },
-    {
-      "id": "selection_task_vs_reminder",
-      "type": "single_call",
-      "category": "selection",
-      "prompt": "Add something to the tracker for elena to review the Q2 numbers.",
-      "available_tools": [
-        "create_task",
-        "create_reminder",
-        "update_task"
-      ],
-      "expected_tool_call": {
-        "name": "create_task",
-        "args": {
-          "assignee": "elena",
-          "title": "review the Q2 numbers"
-        },
-        "loose_args": [
-          "title"
         ]
       }
     },
@@ -351,23 +252,6 @@
       }
     },
     {
-      "id": "arguments_enum_value",
-      "type": "single_call",
-      "category": "arguments",
-      "prompt": "Task T-8821 is moving again — put it back to in progress.",
-      "available_tools": [
-        "update_task",
-        "create_task"
-      ],
-      "expected_tool_call": {
-        "name": "update_task",
-        "args": {
-          "task_id": "T-8821",
-          "status": "in_progress"
-        }
-      }
-    },
-    {
       "id": "arguments_omit_optional",
       "type": "single_call",
       "category": "arguments",
@@ -384,26 +268,6 @@
         },
         "forbidden_args": [
           "due_date"
-        ]
-      }
-    },
-    {
-      "id": "arguments_verbatim_recipient",
-      "type": "single_call",
-      "category": "arguments",
-      "prompt": "Message #eng-team saying the deploy is frozen until Monday.",
-      "available_tools": [
-        "send_message",
-        "create_task"
-      ],
-      "expected_tool_call": {
-        "name": "send_message",
-        "args": {
-          "recipient": "#eng-team",
-          "body": "deploy is frozen until Monday"
-        },
-        "loose_args": [
-          "body"
         ]
       }
     },
@@ -659,6 +523,204 @@
           "specific day"
         ],
         "require_question": true
+      }
+    },
+    {
+      "id": "server_chaining_top_customer_email",
+      "type": "multi_call_chain",
+      "category": "server_chaining",
+      "prompt": "The shop database has `customers` (id, name, email) and `orders` (id, customer_id, total_cents). Find the customer whose orders add up to the highest total, then save only their email address, nothing else, to ${notes}/top_customer.txt.",
+      "mcp_servers": {
+        "shop": {
+          "kind": "sqlite",
+          "fixture": "orders.sql",
+          "tools": [
+            "read_query"
+          ]
+        },
+        "notes": {
+          "kind": "filesystem",
+          "fixture": "notes",
+          "tools": [
+            "write_file"
+          ]
+        }
+      },
+      "expected_tool_call": {
+        "sequence": [
+          {
+            "name": "shop__read_query",
+            "args": {
+              "query": "SELECT c.email FROM customers c JOIN orders o ON o.customer_id = c.id GROUP BY c.id ORDER BY SUM(o.total_cents) DESC LIMIT 1"
+            },
+            "loose_args": [
+              "query"
+            ]
+          },
+          {
+            "name": "notes__write_file",
+            "args": {
+              "path": "${notes}/top_customer.txt",
+              "content": "edsger@example.com"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "server_chaining_ticket_lookup",
+      "type": "multi_call_chain",
+      "category": "server_chaining",
+      "prompt": "Read ${inbox}/request.txt, look up in the shop database (`customers` has id, name, email) what it asks for, and write only that email address to ${inbox}/reply.txt.",
+      "mcp_servers": {
+        "inbox": {
+          "kind": "filesystem",
+          "fixture": "inbox",
+          "tools": [
+            "read_text_file",
+            "write_file"
+          ]
+        },
+        "shop": {
+          "kind": "sqlite",
+          "fixture": "orders.sql",
+          "tools": [
+            "read_query"
+          ]
+        }
+      },
+      "expected_tool_call": {
+        "sequence": [
+          {
+            "name": "inbox__read_text_file",
+            "args": {
+              "path": "${inbox}/request.txt"
+            }
+          },
+          {
+            "name": "shop__read_query",
+            "args": {
+              "query": "SELECT email FROM customers WHERE id = 3"
+            },
+            "loose_args": [
+              "query"
+            ]
+          },
+          {
+            "name": "inbox__write_file",
+            "args": {
+              "path": "${inbox}/reply.txt",
+              "content": "donald@example.com"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "registry_move_file",
+      "type": "single_call",
+      "category": "registry",
+      "prompt": "Rename ${files}/draft.txt to ${files}/final.txt.",
+      "mcp_servers": {
+        "files": {
+          "kind": "filesystem",
+          "fixture": "workspace"
+        },
+        "shop": {
+          "kind": "sqlite",
+          "fixture": "orders.sql"
+        }
+      },
+      "expected_tool_call": {
+        "name": "files__move_file",
+        "args": {
+          "source": "${files}/draft.txt",
+          "destination": "${files}/final.txt"
+        }
+      }
+    },
+    {
+      "id": "registry_insert_row",
+      "type": "single_call",
+      "category": "registry",
+      "prompt": "Add a customer to the shop database (`customers` has id, name, email): id 4, Leslie Lamport, leslie@example.com.",
+      "mcp_servers": {
+        "files": {
+          "kind": "filesystem",
+          "fixture": "workspace"
+        },
+        "shop": {
+          "kind": "sqlite",
+          "fixture": "orders.sql"
+        }
+      },
+      "expected_tool_call": {
+        "name": "shop__write_query",
+        "args": {
+          "query": "INSERT INTO customers (id, name, email) VALUES (4, 'Leslie Lamport', 'leslie@example.com')"
+        },
+        "loose_args": [
+          "query"
+        ]
+      }
+    },
+    {
+      "id": "collision_same_name_file",
+      "type": "single_call",
+      "category": "collision",
+      "prompt": "My work folder is ${work} and my personal folder is ${personal}. What is on the todo.txt in my personal folder?",
+      "mcp_servers": {
+        "work": {
+          "kind": "filesystem",
+          "fixture": "work_notes",
+          "tools": [
+            "read_text_file"
+          ]
+        },
+        "personal": {
+          "kind": "filesystem",
+          "fixture": "personal_notes",
+          "tools": [
+            "read_text_file"
+          ]
+        }
+      },
+      "expected_tool_call": {
+        "name": "personal__read_text_file",
+        "args": {
+          "path": "${personal}/todo.txt"
+        }
+      }
+    },
+    {
+      "id": "collision_same_name_query",
+      "type": "single_call",
+      "category": "collision",
+      "prompt": "How many invoices are still unpaid? (`invoices` has id, customer, amount_cents, paid)",
+      "mcp_servers": {
+        "crm": {
+          "kind": "sqlite",
+          "fixture": "crm.sql",
+          "tools": [
+            "read_query"
+          ]
+        },
+        "billing": {
+          "kind": "sqlite",
+          "fixture": "billing.sql",
+          "tools": [
+            "read_query"
+          ]
+        }
+      },
+      "expected_tool_call": {
+        "name": "billing__read_query",
+        "args": {
+          "query": "SELECT COUNT(*) FROM invoices WHERE paid = 0"
+        },
+        "loose_args": [
+          "query"
+        ]
       }
     }
   ]

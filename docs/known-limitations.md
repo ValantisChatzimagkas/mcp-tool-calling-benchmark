@@ -3,13 +3,14 @@
 Back to the [README](../README.md).
 
 
-See **Scope** in the README for the three big ones (no MCP protocol beyond a stdio smoke,
-self-hosting only run as a 10-case, 1-run subset on one machine under Ollama — see
-[local-ollama.md](local-ollama.md) — and not a certification). They still hold for the
-21-case sweep. The server-backed cases in `mcp_smoke.json` cover stdio `tools/list` /
-`tools/call` against two pinned reference servers (filesystem, sqlite) and nothing else
-of the protocol (no HTTP/SSE, resources, prompts or auth), and there are only 3 of them.
-The rest, specific to the current 21-case suite:
+See **Scope** in the README for the three big ones (no MCP protocol beyond a stdio slice,
+self-hosting only run as a 10-case, 1-run subset of the old 21-case suite on one machine
+under Ollama — see [local-ollama.md](local-ollama.md) — and not a certification). They
+still hold for the 20-case sweep. Its 6 server-backed cases (plus the 3 in
+`mcp_smoke.json`) cover stdio `tools/list` / `tools/call` against two pinned reference
+servers (filesystem, sqlite) and nothing else of the protocol (no HTTP/SSE, resources,
+prompts or auth); the other 14 cases are canned. The rest, specific to the current
+20-case suite:
 
 - Refusal content is checked by substring keywords, not meaning. A model could satisfy
   `must_mention` while asking something unhelpful, and an unusual-but-correct phrasing
@@ -31,12 +32,15 @@ The rest, specific to the current 21-case suite:
   all of the model-ranking signal in the suite, so a contestable call here has more
   leverage on the final numbers than any other single design decision in the project.
   Not yet independently reviewed.
-- `selection`, `arguments`, and `restraint` are saturated — every model tested in the
-  Groq sweep clears them completely across 3 replicated runs (the two local Qwen3
-  models also passed every run of the 2 cases per category they were given, 1 run each,
-  which is weaker evidence). `results.md` labels this explicitly per
-  category now, but it also means 13 of 21 cases (7 selection, 4 arguments, 2 restraint) cost API
-  budget and contribute nothing to ranking as currently written.
+- `selection`, `arguments`, and `restraint` were saturated — every model tested cleared
+  them completely across 3 replicated runs in the last full sweep, which ran the old
+  21-case suite (13 of 21 cases); the two local Qwen3 models also passed every run of the
+  2 cases per category they were given, 1 run each, which is weaker evidence. SOL-103 cut
+  them to 6 sanity cases (2 each) and added `server_chaining`, `registry` and
+  `collision`. `results.md` labels a saturated category explicitly. Whether the new
+  categories discriminate is recorded per category in
+  [docs/cases.md](cases.md#groq-results-for-the-new-categories) once a Groq sweep of
+  the 20-case suite has run; until then it is untested.
 - Wilson intervals describe sampling uncertainty at fixed `temperature=0` output —
   they say nothing about whether a differently-phrased prompt or a different day's
   model snapshot would reproduce the same numbers. Repeats answer "is this noise

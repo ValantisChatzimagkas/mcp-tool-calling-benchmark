@@ -17,29 +17,32 @@ create-task call, and so on).
 
 **What this does not test:**
 
-- **The MCP protocol, beyond a small stdio slice.** The main sweep (`cases.json`, 21
-  cases) uses hand-authored tool schemas sent directly as OpenAI-format `tools` and
-  canned tool results: no JSON-RPC, no `tools/list` / `tools/call`, no MCP server. A
-  real MCP server's schemas are known to be messier than hand-written ones ([BFCL v4's
-  own notes say so](https://gorilla.cs.berkeley.edu/leaderboard.html)), and
-  multi-server tool-namespace collisions aren't modeled there — both are plausible
-  sources of failure that sweep cannot see. The only protocol coverage is the 3
-  server-backed smoke cases in `mcp_smoke.json` (`--suite`): they start pinned
-  reference servers (filesystem, sqlite) over **stdio**, offer the model their real
-  `tools/list` schemas under `<server>__<tool>` names (two filesystem servers collide
-  on tool names), and execute its calls with `tools/call`. That is a smoke test of the
-  path, not a sweep: HTTP/SSE transport, resources, prompts and auth are not exercised.
+- **The MCP protocol, beyond a small stdio slice.** The main sweep (`cases.json`, 20
+  cases) mixes two kinds. 14 cases use hand-authored tool schemas sent directly as
+  OpenAI-format `tools` and canned tool results: no JSON-RPC, no `tools/list` /
+  `tools/call`, no MCP server. A real MCP server's schemas are known to be messier than
+  hand-written ones ([BFCL v4's own notes say
+  so](https://gorilla.cs.berkeley.edu/leaderboard.html)), and the canned cases do not
+  model multi-server tool-namespace collisions. The other 6 are server-backed: they
+  start pinned reference servers (filesystem, sqlite) over **stdio**, offer the model
+  their real `tools/list` schemas under `<server>__<tool>` names, and execute its calls
+  with `tools/call`. They cover chaining on real server output (`server_chaining`), a
+  22-tool prompt from one filesystem and one sqlite server (`registry`), and same-named
+  tools on two servers where only one is right (`collision`). `mcp_smoke.json`
+  (`--suite`) remains a separate 3-case smoke of that path. Only stdio `tools/list` and
+  `tools/call` are exercised: HTTP/SSE transport, resources, prompts and auth are not.
 - **The self-hosted stack, beyond one small run.** The full sweep ran against Groq's
   hosted inference. `BACKEND=ollama` has been run on one CPU laptop: `qwen3:4b` and
-  `qwen3:8b` at `Q4_K_M`, Ollama 0.40.17, 10 of the 21 cases, 1 run each — see
+  `qwen3:8b` at `Q4_K_M`, Ollama 0.40.17, 10 of the **old 21-case, all-canned suite**
+  (before SOL-103; none of the current 6 server-backed cases), 1 run each — see
   [docs/local-ollama.md](docs/local-ollama.md). Hosted-vs-local differences, other
-  quantizations, the remaining cases, and other serving stacks (llama.cpp, vLLM) are
-  untested, not assumed fine.
+  quantizations, the current 20-case suite, and other serving stacks (llama.cpp, vLLM)
+  are untested, not assumed fine.
 - **A certification.** A model passing every case here is evidence it's a reasonable
   *candidate* for MCP-style tool use, not proof it will behave identically in a real
   MCP-based agent. Treat results as a screening signal, not a verdict. See
   [Known limitations](docs/known-limitations.md) for the specific gaps in the current
-  21-case suite.
+  20-case suite.
 
 ## Quickstart
 
@@ -55,17 +58,18 @@ uv run run_eval.py
 
 ```bash
 uv run run_eval.py --models openai/gpt-oss-20b     # one model
-uv run run_eval.py --cases cal_lookup_basic        # one case, all models
+uv run run_eval.py --cases selection_search_vs_lookup  # one case, all models
 uv run run_eval.py --runs 1                        # one run per case, for a smoke test
 uv run run_eval.py --suite mcp_smoke.json --runs 1 # server-backed cases against real MCP servers
 ```
 
-Server-backed cases need `node`/`npm`, `uv` and `bwrap` (bubblewrap) on `PATH`, plus
-network for a one-time install of the pinned servers into the gitignored
-`.mcp-servers/`. Each server runs from that install under bwrap with no network, no
-session bus, `$HOME` and the temp dir masked, and one writable directory (the run's own
-sandbox, seeded from `fixtures/`). What remains is exactly this: the OS tree (`/usr`,
-`/etc`, `/var`, …) is read-only and readable, because a process can't run without it.
+The default run includes the 6 server-backed cases, so it needs `node`/`npm`, `uv` and
+`bwrap` (bubblewrap) on `PATH`, plus network for a one-time install of the pinned
+servers into the gitignored `.mcp-servers/` (`--suite mcp_smoke.json` needs the same).
+Each server runs from that install under bwrap with no network, no session bus,
+`$HOME` and the temp dir masked, and one writable directory (the run's own sandbox,
+seeded from `fixtures/`). What remains is exactly this: the OS tree (`/usr`, `/etc`,
+`/var`, …) is read-only and readable, because a process can't run without it.
 Set `MCP_CONFINEMENT = "none"` in `config.py` to opt out explicitly on a platform
 without bwrap; there is no silent fallback.
 
@@ -76,8 +80,9 @@ local Ollama server, set `BACKEND=ollama` — see
 
 ## Key findings
 
-From the last full sweep (3 models × 21 cases × 3 runs, Groq-hosted). Details and
-caveats in [docs/findings.md](docs/findings.md).
+From the last full sweep, which predates SOL-103 and ran the old 21-case, all-canned
+suite (3 models × 21 cases × 3 runs, Groq-hosted); it does not describe the current
+20-case suite. Details and caveats in [docs/findings.md](docs/findings.md).
 
 - `refusal` and `chaining` carry the signal. `selection`, `arguments` and `restraint`
   passed every run for every model, so they contribute no discriminating evidence.
@@ -102,7 +107,8 @@ comparing, so retrying one tool doesn't fail the case, but slipping in an extra
 
 Cases are scored by `type` (`single_call`, `multi_call_chain`, `no_call`,
 `should_refuse`) and reported by `category` (`selection`, `arguments`, `chaining`,
-`restraint`, `refusal`); the full catalogue is in [docs/cases.md](docs/cases.md).
+`restraint`, `refusal`, `server_chaining`, `registry`, `collision`); the full
+catalogue is in [docs/cases.md](docs/cases.md).
 
 ## More documentation
 

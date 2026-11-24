@@ -13,8 +13,8 @@ sandbox.py    per-run temp sandboxes, pinned server installs, bwrap confinement 
 run_eval.py   loads the suite, runs cases, writes results, CLI
 journal.py    per-run append-only journal behind --resume — file I/O only, no network
 throughput.py prompt and generation tok/s from Ollama's native timings (BACKEND=ollama)
-cases.json    the benchmark suite (data, not code)
-mcp_smoke.json server-backed smoke cases, run with --suite
+cases.json    the benchmark suite (data, not code): 14 canned + 6 server-backed cases
+mcp_smoke.json 3 server-backed smoke cases, run with --suite
 fixtures/     seed data copied into each run's sandbox
 .mcp-servers/ pinned server installs (gitignored, created on first use)
 tests/        pytest — scoring logic, suite integrity, MCP facade; `-m live` for real servers

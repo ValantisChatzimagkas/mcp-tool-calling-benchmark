@@ -4,11 +4,13 @@ Scores models on MCP-style tool calling via any OpenAI-compatible
 `/chat/completions` endpoint (Groq now, self-hosted later).
 
 **Scope:** Tests OpenAI-format function-calling reliability for tools shaped like MCP
-tools. The 21 cases in `cases.json` use hand-written schemas and canned results and do
-not exercise the MCP protocol. Server-backed cases (`mcp_servers`, in `mcp_smoke.json`)
-exercise stdio `tools/list` and `tools/call` against pinned reference servers; HTTP/SSE,
-resources, prompts, auth and the rest of the protocol are not exercised, and no claim
-beyond that is licensed. The name is kept for the connection to why the tools are shaped
+tools. `cases.json` holds 20 cases: 14 canned cases with hand-written schemas and canned
+results, which do not exercise the MCP protocol, and 6 server-backed cases
+(`mcp_servers`: `server_chaining`, `registry`, `collision`). `mcp_smoke.json` holds 3
+more server-backed cases as a smoke of the path. Server-backed cases exercise stdio
+`tools/list` and `tools/call` against pinned reference servers; HTTP/SSE, resources,
+prompts, auth and the rest of the protocol are not exercised, and no claim beyond that
+is licensed. The name is kept for the connection to why the tools are shaped
 this way; don't let it license a protocol-level claim.
 
 ## Commands
@@ -17,7 +19,8 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 
 - Run: `uv run run_eval.py` (`--models <id>` / `--cases <case_id>` to narrow, `--runs <n>`
   to override `RUNS_PER_CASE`, `--resume` to continue an interrupted sweep from its
-  journal)
+  journal). The default suite includes server-backed cases, so it needs `node`/`npm`,
+  `uv`, `bwrap` and network for the one-time server install.
 - Suite: `--suite <file>` runs another suite file, e.g. `uv run run_eval.py --suite
   mcp_smoke.json --runs 1` (server-backed cases; needs `node`/`npm`, `uv`, `bwrap`, and
   network for the one-time server install into `.mcp-servers/`)
@@ -38,7 +41,7 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 | `run_eval.py` | loads the suite, runs cases, writes results, CLI |
 | `journal.py` | per-run append-only journal behind `--resume` — file I/O only, no network, no config |
 | `throughput.py` | measures prompt/generation tok/s from Ollama's native `/api/chat` timings (`BACKEND=ollama` only) |
-| `cases.json` | the benchmark suite (data, not code) |
+| `cases.json` | the benchmark suite (data, not code): 14 canned + 6 server-backed cases |
 | `mcp_smoke.json` | 3 server-backed cases that prove the live-server path |
 | `fixtures/` | seed data copied into each run's sandbox |
 
@@ -98,7 +101,7 @@ the numbers don't support.
    it as settled.
 5. **Scope every capability claim to what was actually tested.** Results from
    Groq-hosted inference license "reliable under Groq-hosted inference"; the Ollama CPU
-   run (`docs/local-ollama.md`: 10 of 21 cases, 1 run each, one laptop) licenses only
+   run (`docs/local-ollama.md`: 10 of the old 21 canned cases, 1 run each, one laptop) licenses only
    that scoped sentence, and other serving stacks stay untested — never "good candidate
    for self-hosting". See README's Scope
    section; it exists because "MCP Tool-Calling Benchmark" oversold what this tests
@@ -128,7 +131,7 @@ the numbers don't support.
   prevent this by itself; the retry-with-backoff in `client.py` is what actually
   recovers the run. Don't "fix" qwen's retries by cranking the delay up further without
   checking `x-ratelimit-*` headers first — request-count pacing isn't the lever.
-  Repeats make the full sweep ~190 base calls and ~10 minutes long; use `--runs 1` with
+  Repeats make the full sweep ~180 base calls and 10+ minutes long; use `--runs 1` with
   `--cases` when smoke-testing.
 - A failing benchmark case usually means the *model* got it wrong. Confirm the harness
   is actually wrong before changing scoring logic to make a case pass.

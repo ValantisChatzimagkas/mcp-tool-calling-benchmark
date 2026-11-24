@@ -61,8 +61,10 @@ anything about other machines, other thread counts or the iGPU.
 
 ## End-to-end result on a subset of the suite
 
-A full sweep was not run. Each model got **10 of the 21 cases** (`cases.json` has 7
-selection, 5 chaining, 4 arguments, 3 refusal and 2 restraint), two per category, **1
+A full sweep was not run. Each model got **10 of the 21 cases of the old, all-canned
+suite** (the suite before SOL-103: 7 selection, 5 chaining, 4 arguments, 3 refusal and 2
+restraint; the current `cases.json` has 20 cases, 6 of them server-backed, and none of
+those were run locally), two per category, **1
 run each**:
 
 | category | cases run |
@@ -115,8 +117,8 @@ Reading this honestly:
 ## What this licenses
 
 Reliable-or-not statements are limited to: *these two Qwen3 models at `Q4_K_M`, served
-by Ollama 0.40.17 on this CPU laptop at a 16384-token context, on 10 of the 21 cases, 1
-run each.* Still untested: the other 11 cases, replicated runs, other quantizations,
+by Ollama 0.40.17 on this CPU laptop at a 16384-token context, on 10 of the old 21 canned
+cases, 1 run each.* Still untested: the other 11 old cases, the current 20-case suite including its server-backed cases, replicated runs, other quantizations,
 hosted-vs-local comparison on the same cases, other serving stacks (llama.cpp, vLLM), the
 iGPU, and any other machine. Nothing here supports calling either model a good candidate
 for self-hosting.

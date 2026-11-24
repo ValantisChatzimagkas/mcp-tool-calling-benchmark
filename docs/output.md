@@ -26,7 +26,7 @@ Progress prints live as it runs, with the per-case run count in the left column:
 
 ```
 === llama-3.3-70b-versatile (3 run(s) per case) ===
-  [3/3] selection_calendar_lookup ok
+  [3/3] selection_search_vs_lookup ok
   [0/3] refusal_missing_body      called tool(s) when none expected: send_message
   [1/3] chaining_three_steps      get_document: wrong value for document_id: 'doc_id_from_search_results' != 'doc_114'
 ```
