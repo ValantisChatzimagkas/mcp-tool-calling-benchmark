@@ -18,8 +18,9 @@ this way; don't let it license a protocol-level claim.
 Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` or pip.
 
 - Run: `uv run run_eval.py` (`--models <id>` / `--cases <case_id>` to narrow, `--runs <n>`
-  to override `RUNS_PER_CASE`). The default suite includes server-backed cases, so it
-  needs `node`/`npm`, `uv`, `bwrap` and network for the one-time server install.
+  to override `RUNS_PER_CASE`, `--resume` to continue an interrupted sweep from its
+  journal). The default suite includes server-backed cases, so it needs `node`/`npm`,
+  `uv`, `bwrap` and network for the one-time server install.
 - Suite: `--suite <file>` runs another suite file, e.g. `uv run run_eval.py --suite
   mcp_smoke.json --runs 1` (server-backed cases; needs `node`/`npm`, `uv`, `bwrap`, and
   network for the one-time server install into `.mcp-servers/`)
@@ -32,12 +33,14 @@ Managed with uv. Prefix everything with `uv run`; don't call `.venv/bin/python` 
 
 | file | holds |
 |---|---|
-| `config.py` | endpoint, key, model list, tuning — the only place these live |
+| `config.py` | backend profiles (`groq`, `ollama`): endpoint, key, model list, tuning — the only place these live |
 | `client.py` | HTTP and response parsing — the only module that touches the network |
 | `scoring.py` | pure pass/fail logic — no I/O, no config |
 | `mcp_client.py` | spawns local stdio MCP servers and speaks `tools/list` / `tools/call`; opens no sockets itself |
 | `sandbox.py` | per-run temp sandboxes, pinned server installs, bwrap argv |
 | `run_eval.py` | loads the suite, runs cases, writes results, CLI |
+| `journal.py` | per-run append-only journal behind `--resume` — file I/O only, no network, no config |
+| `throughput.py` | measures prompt/generation tok/s from Ollama's native `/api/chat` timings (`BACKEND=ollama` only) |
 | `cases.json` | the benchmark suite (data, not code): 14 canned + 6 server-backed cases |
 | `mcp_smoke.json` | 3 server-backed cases that prove the live-server path |
 | `fixtures/` | seed data copied into each run's sandbox |
@@ -97,8 +100,10 @@ the numbers don't support.
    README's Known limitations. State the assumption alongside the number; don't present
    it as settled.
 5. **Scope every capability claim to what was actually tested.** Results from
-   Groq-hosted inference license "reliable under Groq-hosted inference; the self-hosted
-   serving path is untested" — not "good candidate for self-hosting". See README's Scope
+   Groq-hosted inference license "reliable under Groq-hosted inference"; the Ollama CPU
+   run (`docs/local-ollama.md`: 10 of the old 21 canned cases, 1 run each, one laptop) licenses only
+   that scoped sentence, and other serving stacks stay untested — never "good candidate
+   for self-hosting". See README's Scope
    section; it exists because "MCP Tool-Calling Benchmark" oversold what this tests
    before that section was written — don't repeat that in a summary or a commit message.
 6. **Ground methodology choices in established work, not ad-hoc invention.** The `k/n`

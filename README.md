@@ -6,7 +6,8 @@ Measures how reliably a model handles MCP-style tool calling: picking the right 
 filling in the right arguments, chaining calls that depend on each other, and — just
 as important — *not* calling a tool when it shouldn't. It works against anything
 exposing an OpenAI-compatible `/chat/completions` endpoint (Groq for fast iteration;
-llama.cpp / Ollama / vLLM for self-hosted runs) by changing one config value.
+a local Ollama server has been run, llama.cpp / vLLM have not) by changing one config
+value.
 
 ## Scope — read this before trusting a number in this repo
 
@@ -30,10 +31,13 @@ create-task call, and so on).
   tools on two servers where only one is right (`collision`). `mcp_smoke.json`
   (`--suite`) remains a separate 3-case smoke of that path. Only stdio `tools/list` and
   `tools/call` are exercised: HTTP/SSE transport, resources, prompts and auth are not.
-- **The actual self-hosted stack.** Every result so far ran against Groq's hosted
-  inference. `API_BASE_URL` can point at llama.cpp/Ollama with one `.env` line, but that
-  path has not actually been exercised. Quantization and serving differences could shift
-  tool-calling behavior in either direction — this is untested, not assumed fine.
+- **The self-hosted stack, beyond one small run.** The full sweep ran against Groq's
+  hosted inference. `BACKEND=ollama` has been run on one CPU laptop: `qwen3:4b` and
+  `qwen3:8b` at `Q4_K_M`, Ollama 0.40.17, 10 of the **old 21-case, all-canned suite**
+  (before SOL-103; none of the current 6 server-backed cases), 1 run each — see
+  [docs/local-ollama.md](docs/local-ollama.md). Hosted-vs-local differences, other
+  quantizations, the current 20-case suite, and other serving stacks (llama.cpp, vLLM)
+  are untested, not assumed fine.
 - **A certification.** A model passing every case here is evidence it's a reasonable
   *candidate* for MCP-style tool use, not proof it will behave identically in a real
   MCP-based agent. Treat results as a screening signal, not a verdict. See
@@ -71,8 +75,8 @@ without bwrap; there is no silent fallback.
 
 Each (model, case) pair runs 3 times by default and reports `k/n` with a 95% Wilson
 interval. Results go to `results.csv` and `results.md` (both gitignored). For a
-self-hosted server, set `API_BASE_URL` in `.env` — see
-[configuration](docs/configuration.md).
+local Ollama server, set `BACKEND=ollama` — see
+[docs/local-ollama.md](docs/local-ollama.md) and [configuration](docs/configuration.md).
 
 ## Key findings
 
@@ -111,6 +115,8 @@ catalogue is in [docs/cases.md](docs/cases.md).
 - [docs/cases.md](docs/cases.md) — case format, types and categories, chain
   expectations, adding cases/categories/models
 - [docs/configuration.md](docs/configuration.md) — layout, settings, self-hosted endpoints
+- [docs/local-ollama.md](docs/local-ollama.md) — what was run against local Ollama on CPU,
+  with measured throughput
 - [docs/output.md](docs/results.md) — repeated runs, Wilson intervals, output files
 - [docs/findings.md](docs/findings.md) — where models actually diverge
 - [docs/rate-limits.md](docs/rate-limits.md) — Groq rate limits and retry behavior

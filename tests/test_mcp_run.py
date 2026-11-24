@@ -238,6 +238,7 @@ def _run_main(monkeypatch, tmp_path, argv):
     monkeypatch.setattr(config, "API_KEY", "test-key")
     monkeypatch.setattr(config, "RESULTS_CSV_PATH", str(tmp_path / "results.csv"))
     monkeypatch.setattr(config, "RESULTS_MD_PATH", str(tmp_path / "results.md"))
+    monkeypatch.setattr(config, "JOURNAL_PATH", str(tmp_path / "results.journal.jsonl"))
     run_eval.main()
     return (tmp_path / "results.csv"), (tmp_path / "results.md")
 

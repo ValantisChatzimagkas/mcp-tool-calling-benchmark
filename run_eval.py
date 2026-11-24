@@ -9,6 +9,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import re
 import shutil
 import sys
@@ -17,9 +18,17 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 
 import config
-from client import ApiError, chat, parse_tool_calls
+import journal
+from client import (
+    ApiError,
+    ServerUnreachable,
+    chat,
+    describe_model,
+    loaded_context_length,
+    parse_tool_calls,
+)
 from mcp_client import McpServerError, McpServers, ServerSpec
-from sandbox import confine, ensure_installed, open_sandbox, runtime_prefix
+from sandbox import confine, ensure_installed, fixture_digest, open_sandbox, runtime_prefix
 from scoring import score_chain, score_no_call, score_refusal, score_single_call
 
 
@@ -69,6 +78,30 @@ def run_chain(model, case, tools, execute):
 
 
 _PLACEHOLDER = re.compile(r"\$\{([^}]*)\}")
+
+
+def case_tools(case, tool_registry):
+    """What the model is given by a case, as a JSON-able value for the journal's case hash.
+
+    Hand-written cases: the tool schemas themselves. Server-backed cases: the schemas
+    come from the live server's `tools/list` at run time, which the hash must not need a
+    server (or network) for, so it covers what determines them instead: each server's
+    pinned kind (package versions, launch line) and the digest of its seed fixture, which
+    decides the tool results the model sees. Bumping a pin or editing a fixture changes
+    the hash, so `--resume` redoes those runs rather than reusing stale ones.
+    """
+    if "mcp_servers" in case:
+        kinds = config.MCP_SERVER_KINDS
+        return [
+            {
+                "mcp_server": name,
+                "kind": server["kind"],
+                "pin": kinds.get(server["kind"]),
+                "fixture_digest": fixture_digest(config.FIXTURES_DIR, server.get("fixture")),
+            }
+            for name, server in case["mcp_servers"].items()
+        ]
+    return [tool_registry[name] for name in case["available_tools"]]
 
 
 def substitute_paths(value, paths):
@@ -175,18 +208,29 @@ def summarize_runs(results) -> tuple[int, int, str]:
     return passed, len(results), "; ".join(failures) if failures else "ok"
 
 
+def run_once(model, case, tool_registry) -> tuple[bool, str]:
+    """One run of one case. A failed run is scored as a fail, never fatal.
+
+    The exception is a dead server (ServerUnreachable): that says nothing about the
+    model, so it propagates and stops the sweep instead of being recorded as a failure.
+    """
+    try:
+        return run_case(model, case, tool_registry)
+    except ServerUnreachable:
+        raise
+    except ApiError as exc:
+        return False, f"api error: {exc}"
+    except McpServerError as exc:
+        return False, f"mcp server error: {exc}"
+    except Exception as exc:  # a broken case must not kill the sweep
+        return False, f"{type(exc).__name__}: {exc}"
+
+
 def run_case_repeated(model, case, tool_registry, runs) -> tuple[int, int, str]:
-    """Run one case `runs` times. A failed run is scored as a fail, never fatal."""
+    """Run one case `runs` times, without the journal, and summarize."""
     results = []
     for index in range(runs):
-        try:
-            results.append(run_case(model, case, tool_registry))
-        except ApiError as exc:
-            results.append((False, f"api error: {exc}"))
-        except McpServerError as exc:
-            results.append((False, f"mcp server error: {exc}"))
-        except Exception as exc:  # a broken case must not kill the sweep
-            results.append((False, f"{type(exc).__name__}: {exc}"))
+        results.append(run_once(model, case, tool_registry))
         if index < runs - 1:
             time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
     return summarize_runs(results)
@@ -194,11 +238,15 @@ def run_case_repeated(model, case, tool_registry, runs) -> tuple[int, int, str]:
 
 CSV_COLUMNS = [
     "model",
+    "backend",
     "endpoint",
+    "quantization",
+    "context_length",
     "run_timestamp",
     "case_id",
     "category",
     "case_type",
+    "status",
     "runs_passed",
     "runs_total",
     "notes",
@@ -211,6 +259,99 @@ def write_csv(rows, path):
         writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
         writer.writeheader()
         writer.writerows(rows)
+
+
+UNSUPPORTED_NOTE = "chat template has no tool support"
+
+
+def unsupported_rows(model, info, cases, run_timestamp=""):
+    """One row per case for a model that can't be tested: zero runs, not zero passes.
+
+    A model whose chat template has no tool support never reached the scorer, so
+    `0/3` would blame its tool-calling for something the server refused up front.
+    `runs_total=0` keeps these rows out of every rollup by construction.
+    """
+    return [
+        {
+            "model": model,
+            "backend": config.BACKEND,
+            "endpoint": config.API_BASE_URL,
+            "quantization": info.quantization,
+            "context_length": "",
+            "run_timestamp": run_timestamp,
+            "case_id": case["id"],
+            "category": case["category"],
+            "case_type": case["type"],
+            "status": "unsupported",
+            "runs_passed": 0,
+            "runs_total": 0,
+            "notes": UNSUPPORTED_NOTE,
+        }
+        for case in cases
+    ]
+
+
+def matching_records(records, model, quantization, case, tools, runs):
+    """The journaled runs that count for one (model, case) under the current conditions.
+
+    A record counts only if backend, endpoint, quantization and the case's fingerprint
+    all match, and its run_index is within the requested runs — one record per index, in
+    run order. Anything else (another host, another quantization, an edited case, a run
+    beyond --runs) is stale and ignored rather than merged into this row.
+    """
+    case_hash = journal.case_fingerprint(case, tools)
+    # Same key as the run being asked for, bar the run index.
+    wanted = journal.run_key(
+        config.BACKEND, config.API_BASE_URL, model, quantization, case["id"], case_hash, 0
+    )[:-1]
+    by_index = {}
+    for r in records:
+        if journal.record_key(r)[:-1] == wanted and r["run_index"] < runs:
+            by_index.setdefault(r["run_index"], r)
+    return [by_index[i] for i in sorted(by_index)]
+
+
+def build_rows(records, models, cases, tool_registry, runs, infos, unsupported_timestamp=""):
+    """Rebuild one result row per (model, case) from the journal. Pure.
+
+    Rows come from the journal rather than from memory, so a resumed sweep and an
+    uninterrupted one produce the same results.csv (bar run_timestamp, which is the
+    earliest run in the row — a resumed sweep spans sessions).
+    """
+    rows = []
+    for model in models:
+        info = infos[model]
+        if not info.supports_tools:
+            rows += unsupported_rows(model, info, cases, unsupported_timestamp)
+            continue
+        for case in cases:
+            tools = case_tools(case, tool_registry)
+            mine = matching_records(records, model, info.quantization, case, tools, runs)
+            passed, total, notes = summarize_runs([(r["passed"], r["note"]) for r in mine])
+            contexts = {r["context_length"] for r in mine if r["context_length"] is not None}
+            context = "mixed" if len(contexts) > 1 else next(iter(contexts), "")
+            rows.append(
+                {
+                    "model": model,
+                    "backend": config.BACKEND,
+                    "endpoint": config.API_BASE_URL,
+                    "quantization": info.quantization,
+                    "context_length": context,
+                    "run_timestamp": min((r["timestamp"] for r in mine), default=""),
+                    "case_id": case["id"],
+                    "category": case["category"],
+                    "case_type": case["type"],
+                    "status": "ok",
+                    "runs_passed": passed,
+                    "runs_total": total,
+                    "notes": notes,
+                }
+            )
+    return rows
+
+
+def _is_unsupported(model_rows):
+    return bool(model_rows) and all(r["status"] == "unsupported" for r in model_rows)
 
 
 def _tally(rows):
@@ -256,7 +397,8 @@ def _cell(passed, total):
 CATEGORY_NOTES = {
     "refusal": (
         "Scored by `must_mention` keyword lists in cases.json, calibrated against "
-        "responses actually observed from these 3 models — not a systematic process. "
+        "responses actually observed from the 3 Groq-hosted models in README's Key "
+        "findings — not a systematic process. "
         "A correct refusal phrased unusually by an untested model could false-fail here."
     ),
 }
@@ -268,26 +410,44 @@ def write_markdown(rows, models, cases, runs, run_started, path, suite_path):
     Every rate is passed runs over total runs, so a case that passes 2 of 3 counts as
     two thirds of a case rather than rounding to a pass or a fail.
 
+    The `## Models` table says what each model tag was actually served as (quantization,
+    context window), read from the rows so it can't disagree with results.csv.
+
     `run_started` must be the same timestamp written into results.csv's rows — one
     run, one timestamp, so the two files can't disagree about when this happened.
     """
     categories = list(dict.fromkeys(c["category"] for c in cases))
     lookup = {(r["model"], r["case_id"]): r for r in rows}
+    unsupported = {m for m in models if _is_unsupported([r for r in rows if r["model"] == m])}
     lines = []
 
     lines += [
         "# MCP tool-calling benchmark",
         "",
         f"- **Run:** {run_started:%Y-%m-%d %H:%M UTC}",
+        f"- **Backend:** `{config.BACKEND}`",
         f"- **Endpoint:** `{config.API_BASE_URL}`",
         f"- **Suite:** `{suite_path}`",
         f"- **Cases:** {len(cases)} across {len(categories)} categories",
-        f"- **Models:** {len(models)}",
+        f"- **Models:** {len(models)}"
+        + (f" ({len(unsupported)} unsupported)" if unsupported else ""),
         f"- **Runs per case:** {runs}",
         "- **Confidence:** 95% Wilson score intervals in parentheses. At "
         f"{runs} run(s) per case these are wide by nature — a clean k/n is not "
         "proof of reliability, it's a sample. See README's Scope section before "
         "treating any single number here as a verdict.",
+        "",
+        "## Models",
+        "",
+        "| model | backend | quantization | context_length |",
+        "|---|---|---|---|",
+    ]
+    for model in models:
+        model_rows = [r for r in rows if r["model"] == model]
+        context = next((r["context_length"] for r in model_rows if r["context_length"]), "")
+        quantization = model_rows[0]["quantization"] if model_rows else "unknown"
+        lines.append(f"| `{model}` | {config.BACKEND} | {quantization} | {context or '—'} |")
+    lines += [
         "",
         "## Pass rate",
         "",
@@ -296,9 +456,14 @@ def write_markdown(rows, models, cases, runs, run_started, path, suite_path):
     ]
     for model in models:
         model_rows = [r for r in rows if r["model"] == model]
-        cells = [_fraction(*_tally(model_rows))]
-        for category in categories:
-            cells.append(_fraction(*_tally([r for r in model_rows if r["category"] == category])))
+        if model in unsupported:
+            cells = ["unsupported"] * (len(categories) + 1)
+        else:
+            cells = [_fraction(*_tally(model_rows))]
+            for category in categories:
+                cells.append(
+                    _fraction(*_tally([r for r in model_rows if r["category"] == category]))
+                )
         lines.append(f"| `{model}` | " + " | ".join(cells) + " |")
 
     lines += ["", "## Results", ""]
@@ -308,8 +473,13 @@ def write_markdown(rows, models, cases, runs, run_started, path, suite_path):
             lines += [CATEGORY_NOTES[category], ""]
 
         cat_rows = [r for r in rows if r["category"] == category]
-        per_model = {m: _tally([r for r in cat_rows if r["model"] == m]) for m in models}
-        saturated = all(p == t and t > 0 for p, t in per_model.values())
+        per_model = {
+            m: _tally([r for r in cat_rows if r["model"] == m])
+            for m in models
+            if m not in unsupported
+        }
+        # Unsupported models were never tested, so they neither block nor earn saturation.
+        saturated = bool(per_model) and all(p == t and t > 0 for p, t in per_model.values())
         if saturated:
             total_runs = next(iter(per_model.values()))[1]
             lines += [
@@ -326,7 +496,12 @@ def write_markdown(rows, models, cases, runs, run_started, path, suite_path):
             cells = []
             for model in models:
                 row = lookup.get((model, case["id"]))
-                cells.append("—" if row is None else _cell(row["runs_passed"], row["runs_total"]))
+                if row is None:
+                    cells.append("—")
+                elif row["status"] == "unsupported":
+                    cells.append("unsupported")
+                else:
+                    cells.append(_cell(row["runs_passed"], row["runs_total"]))
             lines.append(f"| {case['id']} | {case['type']} | " + " | ".join(cells) + " |")
         lines.append("")
 
@@ -344,7 +519,7 @@ def write_markdown(rows, models, cases, runs, run_started, path, suite_path):
         f.write("\n".join(lines) + "\n")
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", nargs="+", help="override the model list in config")
     parser.add_argument("--cases", nargs="+", help="only run these case ids")
@@ -354,18 +529,32 @@ def main():
         help=f"runs per (model, case); overrides RUNS_PER_CASE={config.RUNS_PER_CASE}",
     )
     parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="continue an interrupted sweep from its journal instead of refusing to start",
+    )
+    parser.add_argument(
         "--suite",
         default=config.CASES_PATH,
         help=f"suite file to run (default {config.CASES_PATH})",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     runs = args.runs if args.runs is not None else config.RUNS_PER_CASE
     if runs < 1:
         sys.exit("--runs must be at least 1")
 
-    if not config.API_KEY and "localhost" not in config.API_BASE_URL:
-        sys.exit("GROQ_API_KEY is not set — copy .env.example to .env and fill it in.")
+    if config.REQUIRES_API_KEY and not config.API_KEY:
+        sys.exit(
+            "GROQ_API_KEY is not set — copy .env.example to .env and fill it in. "
+            "For a local Ollama server set BACKEND=ollama instead."
+        )
+
+    # A live journal only exists after an interrupted sweep (a finished one is archived).
+    # Silently reusing it would fold old runs into a sweep that was meant to be fresh.
+    journal_path = config.JOURNAL_PATH
+    if not args.resume and os.path.exists(journal_path) and os.path.getsize(journal_path) > 0:
+        sys.exit(f"journal exists; pass --resume to continue it, or delete {journal_path}")
 
     tool_registry, all_cases = load_suite(args.suite)
     cases = all_cases
@@ -377,38 +566,96 @@ def main():
             sys.exit(f"unknown case id(s): {', '.join(sorted(missing))}")
 
     models = args.models or config.MODELS
-    rows = []
 
-    # One timestamp for the whole sweep, stamped on every row and on results.md, so
-    # two separately-run sweeps (e.g. Groq today, a self-hosted server next week)
-    # can never be silently merged without the endpoint/time difference showing up
-    # in the data itself — see README's Scope section on why that distinction matters.
-    run_started = datetime.now(timezone.utc)
-
+    # Ask the server about every model before running any case: an unpulled model or a
+    # server that is down should stop the sweep now, not after an hour of other work.
+    infos = {}
     for model in models:
-        print(f"\n=== {model} ({runs} run(s) per case) ===")
-        for case in cases:
-            passed, total, notes = run_case_repeated(model, case, tool_registry, runs)
+        try:
+            infos[model] = describe_model(model)
+        except ApiError as exc:
+            sys.exit(f"cannot describe model {model}: {exc}")
 
-            print(f"  [{passed}/{total}] {case['id']:<24} {notes}")
-            rows.append(
-                {
-                    "model": model,
-                    "endpoint": config.API_BASE_URL,
-                    "run_timestamp": run_started.isoformat(timespec="seconds"),
-                    "case_id": case["id"],
-                    "category": case["category"],
-                    "case_type": case["type"],
-                    "runs_passed": passed,
-                    "runs_total": total,
-                    "notes": notes,
-                }
-            )
-            time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
+    records = journal.load(journal_path) if args.resume else []
+    done = {journal.record_key(r) for r in records}
+    context_lengths = {}
+    started = datetime.now(timezone.utc)
+
+    try:
+        for model in models:
+            info = infos[model]
+            if not info.supports_tools:
+                print(f"\n=== {model}: unsupported ({UNSUPPORTED_NOTE}) — skipped ===")
+                continue
+
+            print(f"\n=== {model} ({runs} run(s) per case) ===")
+            for case in cases:
+                tools = case_tools(case, tool_registry)
+                case_hash = journal.case_fingerprint(case, tools)
+                for run_index in range(runs):
+                    key = journal.run_key(
+                        config.BACKEND,
+                        config.API_BASE_URL,
+                        model,
+                        info.quantization,
+                        case["id"],
+                        case_hash,
+                        run_index,
+                    )
+                    if key in done:
+                        continue
+
+                    passed, note = run_once(model, case, tool_registry)
+
+                    # The model is loaded by now, so /api/ps can say what context it got.
+                    if context_lengths.get(model) is None:
+                        context_lengths[model] = loaded_context_length(model)
+
+                    record = {
+                        "backend": config.BACKEND,
+                        "endpoint": config.API_BASE_URL,
+                        "model": model,
+                        "quantization": info.quantization,
+                        "case_id": case["id"],
+                        "case_hash": case_hash,
+                        "run_index": run_index,
+                        "passed": passed,
+                        "note": note,
+                        "context_length": context_lengths[model],
+                        "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                    }
+                    journal.append(journal_path, record)
+                    records.append(record)
+                    time.sleep(config.DELAY_BETWEEN_CALLS_SECONDS)
+
+                mine = matching_records(records, model, info.quantization, case, tools, runs)
+                p, t, notes = summarize_runs([(r["passed"], r["note"]) for r in mine])
+                print(f"  [{p}/{t}] {case['id']:<24} {notes}")
+    except ServerUnreachable as exc:
+        sys.exit(f"server unreachable ({exc}); rerun with --resume")
+    except KeyboardInterrupt:
+        sys.exit("interrupted; completed runs are journaled — rerun with --resume")
+
+    rows = build_rows(
+        records,
+        models,
+        cases,
+        tool_registry,
+        runs,
+        infos,
+        unsupported_timestamp=started.isoformat(timespec="seconds"),
+    )
+    stamps = [r["run_timestamp"] for r in rows if r["run_timestamp"]]
+    run_started = datetime.fromisoformat(min(stamps)) if stamps else started
 
     write_csv(rows, config.RESULTS_CSV_PATH)
     write_markdown(rows, models, cases, runs, run_started, config.RESULTS_MD_PATH, args.suite)
     print(f"\nWrote {config.RESULTS_CSV_PATH} and {config.RESULTS_MD_PATH}")
+
+    # Only after both result files exist: a crash above leaves the journal for --resume.
+    archived = journal.archive(journal_path, datetime.now(timezone.utc))
+    if archived:
+        print(f"Archived the run journal to {archived}")
 
 
 if __name__ == "__main__":

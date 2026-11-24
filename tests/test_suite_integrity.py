@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 
 import config
-from run_eval import CSV_COLUMNS, _cell, _fraction, _tally, wilson_interval
+from client import ModelInfo
+from run_eval import CSV_COLUMNS, _cell, _fraction, _tally, unsupported_rows, wilson_interval
 
 CATEGORIES = {
     "selection",
@@ -356,6 +357,13 @@ def test_csv_columns_carry_run_provenance():
     assert "run_timestamp" in CSV_COLUMNS
 
 
+def test_csv_columns_carry_backend_quantization_context_status():
+    """Quantization and context window both change tool-calling behaviour, and the
+    model tag alone carries neither (`qwen3:4b` says nothing about Q4 vs Q8)."""
+    for column in ("backend", "quantization", "context_length", "status"):
+        assert column in CSV_COLUMNS
+
+
 # --- wilson_interval ---------------------------------------------------------
 # The whole point of adding this: a bare "3/3" reads as proof of 100% reliability.
 # It isn't — these tests pin down how wide the interval actually is at small n, so
@@ -389,3 +397,29 @@ def test_cell_shows_ci_and_bolds_anything_short_of_a_clean_pass():
     assert _cell(3, 3) == "3/3 (44%–100%)"
     assert _cell(0, 3) == "**0/3 (0%–56%)**"
     assert _cell(2, 3) == "**2/3 (21%–94%)**"
+
+
+# --- unsupported rows --------------------------------------------------------
+
+
+def test_unsupported_rows_have_status_and_zero_runs(suite):
+    cases = [c for c in suite["cases"] if c["category"] in ("selection", "refusal")]
+    rows = unsupported_rows("notools", ModelInfo("Q4_0", False), cases)
+
+    assert [r["case_id"] for r in rows] == [c["id"] for c in cases]
+    for row, case in zip(rows, cases, strict=True):
+        assert (row["status"], row["runs_passed"], row["runs_total"]) == ("unsupported", 0, 0)
+        assert row["category"] == case["category"] and row["case_type"] == case["type"]
+        assert row["quantization"] == "Q4_0" and row["model"] == "notools"
+        assert "tool support" in row["notes"]
+    assert set(rows[0]) == set(CSV_COLUMNS)
+
+
+def test_unsupported_rows_do_not_enter_any_rollup(suite):
+    """Pinning test: _tally already gives (3, 3) for zero-run rows. It guards against a
+    later change that gives unsupported rows a non-zero runs_total — a model that could
+    not be tested must never read as `0/n` in a category or overall figure."""
+    rows = unsupported_rows("notools", ModelInfo("Q4_0", False), suite["cases"][:3])
+
+    assert _tally([_row(3, 3), *rows]) == (3, 3)
+    assert _fraction(*_tally(rows)) == "—"
