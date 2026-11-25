@@ -1,7 +1,7 @@
 # MCP Tool-Calling Benchmark
 
 Scores models on MCP-style tool calling via any OpenAI-compatible
-`/chat/completions` endpoint (Groq now, self-hosted later).
+`/chat/completions` endpoint (Groq, or a local Ollama server via `BACKEND=ollama`).
 
 **Scope:** Tests OpenAI-format function-calling reliability for tools shaped like MCP
 tools. `cases.json` holds 20 cases: 14 canned cases with hand-written schemas and canned
@@ -101,7 +101,7 @@ the numbers don't support.
    it as settled.
 5. **Scope every capability claim to what was actually tested.** Results from
    Groq-hosted inference license "reliable under Groq-hosted inference"; the Ollama CPU
-   run (`docs/local-ollama.md`: 10 of the old 21 canned cases, 1 run each, one laptop) licenses only
+   run (`docs/local-ollama.md`: the 20-case suite, 1 run per case, one laptop) licenses only
    that scoped sentence, and other serving stacks stay untested — never "good candidate
    for self-hosting". See README's Scope
    section; it exists because "MCP Tool-Calling Benchmark" oversold what this tests

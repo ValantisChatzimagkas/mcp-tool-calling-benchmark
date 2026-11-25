@@ -347,6 +347,11 @@ class McpServers:
         except concurrent.futures.TimeoutError as exc:
             future.cancel()
             raise McpServerError(f"call to {name} timed out") from exc
+        except (KeyboardInterrupt, SystemExit):
+            # An interrupt is the user's, not the server's: let it reach the sweep's
+            # interrupt path instead of becoming a failed (and journaled) run.
+            future.cancel()
+            raise
         except BaseException as exc:
             raise _unwrap(exc, self._stderr_tail()) from exc
         return _result_text(result)

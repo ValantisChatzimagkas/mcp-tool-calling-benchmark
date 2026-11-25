@@ -33,11 +33,10 @@ create-task call, and so on).
   `tools/call` are exercised: HTTP/SSE transport, resources, prompts and auth are not.
 - **The self-hosted stack, beyond one small run.** The full sweep ran against Groq's
   hosted inference. `BACKEND=ollama` has been run on one CPU laptop: `qwen3:4b` and
-  `qwen3:8b` at `Q4_K_M`, Ollama 0.40.17, 10 of the **old 21-case, all-canned suite**
-  (before SOL-103; none of the current 6 server-backed cases), 1 run each — see
-  [docs/local-ollama.md](docs/local-ollama.md). Hosted-vs-local differences, other
-  quantizations, the current 20-case suite, and other serving stacks (llama.cpp, vLLM)
-  are untested, not assumed fine.
+  `qwen3:8b` at `Q4_K_M`, Ollama 0.40.17, the current 20-case suite, **1 run per case**
+  (not 3) — see [docs/local-ollama.md](docs/local-ollama.md). Replicated local runs,
+  hosted-vs-local differences, other quantizations, and other serving stacks
+  (llama.cpp, vLLM) are untested, not assumed fine.
 - **A certification.** A model passing every case here is evidence it's a reasonable
   *candidate* for MCP-style tool use, not proof it will behave identically in a real
   MCP-based agent. Treat results as a screening signal, not a verdict. See
